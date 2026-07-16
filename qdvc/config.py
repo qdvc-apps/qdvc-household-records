@@ -106,14 +106,14 @@ class Config:
 
     @property
     def data_folder(self) -> str:
-        """App-wide folder holding PDFs referenced across all workspaces.
+        """App-wide folder holding the PDFs referenced across all workspaces.
 
-        Falls back to the default XDG location when unset. The directory is
-        created on read so callers can rely on it existing.
+        The app treats this folder as READ-ONLY and never creates or modifies
+        it. Falls back to the default XDG location when unset; the returned
+        path may not exist yet (the UI surfaces that where relevant).
         """
         value = self.get("data_folder")
         path = value if value else _default_data_dir()
-        os.makedirs(path, exist_ok=True)
         return os.path.abspath(path)
 
     @data_folder.setter

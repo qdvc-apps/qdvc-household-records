@@ -20,7 +20,11 @@ mechanics.
 | Lists (panes)      | `Gtk.TreeView` + `Gtk.ListStore`            | `Gtk.ListBox` of rows / `Adw.PreferencesGroup` rows     |
 | Detail editors     | `Gtk.Grid` of entries                       | `Adw.PreferencesGroup` with `EntryRow`/`SwitchRow`/`SpinRow` |
 
-| Detail editors     | popup dialogs (`gtk3_dialogs.py`)           | popup dialogs (`gtk4_dialogs.py`)                       |
+| Organiser Pane 1  | column in a `Gtk.Paned` chain               | sidebar via `Adw.OverlaySplitView` (header toggle)      |
+| Organiser P2/P3   | `Gtk.Paned` chain                           | `Gtk.Paned`, start child `resize=False` (no auto-resize)|
+| Documents source  | top-level PDFs in the account's folder      | same (shared core `scan_account`)                       |
+| Subfolder warning | `Gtk.InfoBar` atop Pane 3                    | `Adw.Banner` atop Pane 3                                 |
+| Detail editors    | popup dialogs (`gtk3_dialogs.py`)           | popup dialogs (`gtk4_dialogs.py`)                       |
 | Account settings   | right-click row → context menu → dialog     | right-click row (or "Settings…" button) → dialog        |
 | Setup item editing | right-click row → context menu (edit/delete)| per-row edit + delete buttons; "Add…" row               |
 | Date entry         | `Gtk.Calendar` in a dialog (0-based month)  | `Gtk.Calendar` in a dialog (`GLib.DateTime`, 1-based)   |

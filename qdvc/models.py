@@ -52,28 +52,51 @@ class Zone:
     person_id: str | None  # None => shared
 
 
-# ---- Business records (stored in the workspace) ----------------------
+# ---- Business records ------------------------------------------------
 
 @dataclass
-class Document:
-    """A catalogued file inside an account.
-
-    `path` is ALWAYS relative to the workspace data folder.
-    """
-    id: str
-    path: str
+class Catalogue:
+    """Per-file catalogue tags, stored in the account YAML keyed by filename."""
     statement_number: str = ""
     date_issued: str = ""      # ISO "YYYY-MM-DD" or ""
     notes: str = ""
 
+    def is_empty(self) -> bool:
+        return not (self.statement_number or self.date_issued or self.notes)
+
+
+@dataclass
+class Document:
+    """A document belonging to an account.
+
+    Documents are DISCOVERED by reading the account's folder (top-level PDFs);
+    the app never creates or modifies them. Catalogue tags are stored in the
+    account YAML keyed by `filename`.
+
+    `filename` is the base name of the file within the account folder.
+    `present` is True when the file currently exists in the folder; a catalogue
+    entry whose file has disappeared is surfaced as a missing document
+    (present=False) with its tags retained.
+    """
+    filename: str
+    statement_number: str = ""
+    date_issued: str = ""      # ISO "YYYY-MM-DD" or ""
+    notes: str = ""
+    present: bool = True
+
 
 @dataclass
 class Account:
-    """An account within a zone (e.g. Bank of Atlantis)."""
+    """An account within a zone (e.g. Bank of Atlantis).
+
+    `folder` is a path RELATIVE to the data folder; the PDFs directly inside it
+    are the account's documents. `catalogues` holds per-filename tags.
+    """
     id: str
     zone_key: str
     name: str
+    folder: str = ""           # relative to the data folder ("" => not set)
     periodic: bool = False
     cycle_days: int = 0
     notes: str = ""
-    documents: list[Document] = field(default_factory=list)
+    catalogues: dict[str, Catalogue] = field(default_factory=dict)

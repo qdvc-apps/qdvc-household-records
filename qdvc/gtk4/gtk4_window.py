@@ -52,6 +52,17 @@ class MainWindow(Adw.ApplicationWindow):
         open_btn.set_action_name("win.open_workspace")
         header.pack_start(open_btn)
 
+        # Sidebar toggle for the Organiser's zones sidebar; only shown when the
+        # Organiser page is visible.
+        self.sidebar_btn = Gtk.ToggleButton()
+        self.sidebar_btn.set_icon_name("sidebar-show-symbolic")
+        self.sidebar_btn.set_tooltip_text("Toggle zones sidebar")
+        self.sidebar_btn.set_active(True)
+        self.sidebar_btn.connect("toggled", self._on_sidebar_toggled)
+        header.pack_start(self.sidebar_btn)
+        self.stack.connect("notify::visible-child-name",
+                           self._on_visible_child_changed)
+
         menu_btn = Gtk.MenuButton(icon_name="open-menu-symbolic")
         menu_btn.set_primary(True)
         menu_btn.set_menu_model(self._build_menu())
@@ -61,6 +72,17 @@ class MainWindow(Adw.ApplicationWindow):
         toolbar_view.set_content(self.stack)
 
         self._update_actions_sensitivity()
+        self._on_visible_child_changed()
+
+    def _on_sidebar_toggled(self, btn) -> None:
+        self.organiser_view.split.set_show_sidebar(btn.get_active())
+
+    def _on_visible_child_changed(self, *_a) -> None:
+        on_org = self.stack.get_visible_child_name() == "organiser"
+        self.sidebar_btn.set_visible(on_org)
+        if on_org:
+            self.sidebar_btn.set_active(
+                self.organiser_view.split.get_show_sidebar())
 
     def _build_menu(self) -> Gio.Menu:
         menu = Gio.Menu()

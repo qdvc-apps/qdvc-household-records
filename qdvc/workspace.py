@@ -5,16 +5,18 @@ Layout on disk (all YAML, human-readable, diffable):
     <workspace>/
         household.yml          people + zoneblocks (Setup-tab config)
         accounts/
-            <account_id>.yml   one file per account (incl. its documents)
+            <account_id>.yml   one file per account
 
-Every document path stored in an account is RELATIVE to the workspace
-folder; absolute paths and paths outside the workspace are rejected.
+Each account points at a FOLDER inside the app-wide data folder (stored as a
+path relative to the data folder). The PDFs directly inside that folder ARE the
+account's documents — discovered read-only at load time. The app NEVER creates,
+moves, or modifies anything in the data folder; it only reads it and records
+tags in the workspace YAML, keyed by filename.
 """
 from __future__ import annotations
 
 import datetime as _dt
 import os
-import shutil
 
 import yaml
 
@@ -25,6 +27,7 @@ from .models import (
     SCOPE_SHARED,
     VALID_SCOPES,
     Account,
+    Catalogue,
     Document,
     Person,
     Zone,
@@ -33,9 +36,11 @@ from .models import (
 
 HOUSEHOLD_FILE = "household.yml"
 ACCOUNTS_DIR = "accounts"
+PDF_EXTS = (".pdf",)
 
 
 def _atomic_write_yaml(path: str, data) -> None:
+    """Write YAML atomically. Only ever used for WORKSPACE files."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -53,25 +58,33 @@ def _parse_date(value: str) -> _dt.date | None:
 
 
 class PathOutsideDataFolderError(ValueError):
-    """Raised when a file to import is not inside the app-wide data folder."""
+    """Raised when a chosen folder is not inside the app-wide data folder."""
 
 
 # Backwards-compatible alias.
 PathOutsideWorkspaceError = PathOutsideDataFolderError
 
 
+class FolderScan:
+    """Result of reading an account's folder (read-only)."""
+
+    def __init__(self, documents: list[Document], has_subfolders: bool,
+                 exists: bool) -> None:
+        self.documents = documents
+        self.has_subfolders = has_subfolders
+        self.exists = exists
+
+
 class Workspace:
     """In-memory aggregate over the on-disk files.
 
     `root` is this workspace's own folder (its YAML lives here).
-    `data_folder` is the app-wide store of PDFs shared across ALL workspaces;
-    every document path is stored relative to it.
+    `data_folder` is the app-wide, read-only store of PDFs shared across ALL
+    workspaces; each account's folder is stored relative to it.
     """
 
     def __init__(self, root: str, data_folder: str | None = None) -> None:
         self.root = os.path.abspath(root)
-        # If not supplied, fall back to the workspace root so the pure layer
-        # remains usable standalone; the app always passes the configured folder.
         self.data_folder = os.path.abspath(data_folder) if data_folder else self.root
         self.people: list[Person] = []
         self.zoneblocks: list[ZoneBlock] = []
@@ -81,8 +94,8 @@ class Workspace:
     @classmethod
     def create(cls, root: str, data_folder: str | None = None) -> "Workspace":
         ws = cls(root, data_folder)
+        # Only the WORKSPACE is created here; the data folder is never written.
         os.makedirs(os.path.join(ws.root, ACCOUNTS_DIR), exist_ok=True)
-        os.makedirs(ws.data_folder, exist_ok=True)
         if not os.path.exists(ws._household_path()):
             ws.save_household()
         return ws
@@ -155,25 +168,26 @@ class Workspace:
                     data = yaml.safe_load(fh) or {}
             except Exception:
                 continue
-            docs = [
-                Document(
-                    id=d.get("id") or naming.new_id("doc"),
-                    path=d.get("path", ""),
-                    statement_number=str(d.get("statement_number", "")),
-                    date_issued=str(d.get("date_issued", "")),
-                    notes=d.get("notes", ""),
+            catalogues: dict[str, Catalogue] = {}
+            for entry in (data.get("catalogues") or []):
+                fname = entry.get("filename")
+                if not fname:
+                    continue
+                catalogues[fname] = Catalogue(
+                    statement_number=str(entry.get("statement_number", "")),
+                    date_issued=str(entry.get("date_issued", "")),
+                    notes=entry.get("notes", ""),
                 )
-                for d in (data.get("documents") or [])
-            ]
             self.accounts.append(
                 Account(
                     id=data.get("id") or os.path.splitext(name)[0],
                     zone_key=data.get("zone_key", ""),
                     name=data.get("name", ""),
+                    folder=data.get("folder", "") or "",
                     periodic=bool(data.get("periodic", False)),
                     cycle_days=int(data.get("cycle_days", 0) or 0),
                     notes=data.get("notes", ""),
-                    documents=docs,
+                    catalogues=catalogues,
                 )
             )
 
@@ -182,30 +196,32 @@ class Workspace:
             "id": account.id,
             "zone_key": account.zone_key,
             "name": account.name,
+            "folder": account.folder,
             "periodic": account.periodic,
             "cycle_days": account.cycle_days,
             "notes": account.notes,
-            "documents": [
+            "catalogues": [
                 {
-                    "id": d.id,
-                    "path": d.path,
-                    "statement_number": d.statement_number,
-                    "date_issued": d.date_issued,
-                    "notes": d.notes,
+                    "filename": fname,
+                    "statement_number": cat.statement_number,
+                    "date_issued": cat.date_issued,
+                    "notes": cat.notes,
                 }
-                for d in account.documents
+                for fname, cat in sorted(account.catalogues.items())
+                if not cat.is_empty()
             ],
         }
         _atomic_write_yaml(self._account_path(account.id), data)
 
     def delete_account(self, account: Account) -> None:
+        """Remove the account's WORKSPACE YAML. The data folder is untouched."""
         self.accounts = [a for a in self.accounts if a.id != account.id]
         try:
             os.remove(self._account_path(account.id))
         except FileNotFoundError:
             pass
 
-    # ---- mutation API ------------------------------------------------
+    # ---- mutation API (people / zoneblocks) --------------------------
     def add_person(self, name: str) -> Person:
         taken = {p.id for p in self.people}
         person = Person(id=naming.person_id(name, taken), name=name.strip())
@@ -250,13 +266,7 @@ class Workspace:
                 break
         self.save_household()
 
-    def update_account_settings(self, account: Account, periodic: bool,
-                                cycle_days: int, notes: str) -> None:
-        account.periodic = bool(periodic)
-        account.cycle_days = int(cycle_days or 0)
-        account.notes = notes
-        self.save_account(account)
-
+    # ---- mutation API (accounts) -------------------------------------
     @staticmethod
     def _owner_of_zone_key(zone_key: str) -> str:
         """Extract the owner segment ('freja' or 'shared') from a zone key."""
@@ -278,67 +288,95 @@ class Workspace:
         self.save_account(acc)
         return acc
 
-    def add_document(self, account: Account, absolute_path: str,
-                     statement_number: str = "", date_issued: str = "",
-                     notes: str = "") -> Document:
-        """Add a filesystem file to an account as a relative-path document.
-
-        The path is stored relative to the app-wide DATA FOLDER. Raises
-        PathOutsideDataFolderError if the file is not inside that folder.
-        """
-        rel = self.relativise(absolute_path)  # raises if outside
-        doc = Document(
-            id=naming.new_id("doc"),
-            path=rel,
-            statement_number=statement_number,
-            date_issued=date_issued,
-            notes=notes,
-        )
-        account.documents.append(doc)
-        self.save_account(account)
-        return doc
-
-    def remove_document(self, account: Account, document_id: str) -> None:
-        account.documents = [d for d in account.documents if d.id != document_id]
+    def update_account_settings(self, account: Account, periodic: bool,
+                                cycle_days: int, notes: str) -> None:
+        account.periodic = bool(periodic)
+        account.cycle_days = int(cycle_days or 0)
+        account.notes = notes
         self.save_account(account)
 
-    def import_document(self, account: Account, source_path: str,
-                        statement_number: str = "", date_issued: str = "",
-                        notes: str = "") -> Document:
-        """Copy an external file INTO the data folder, then catalogue it.
+    def set_account_folder(self, account: Account, absolute_path: str) -> None:
+        """Point an account at a folder inside the data folder (read-only).
 
-        The file is copied to `<data_folder>/<account_id>/<filename>`, with a
-        numeric suffix on the stem if that name is already taken. Unlike
-        `add_document`, the source may live anywhere on disk. Returns the new
-        Document (whose stored path is relative to the data folder).
+        Stores the folder relative to the data folder. Raises
+        PathOutsideDataFolderError if the folder is not inside it. Nothing on
+        disk is created or modified.
         """
-        source_path = os.path.abspath(source_path)
-        if not os.path.isfile(source_path):
-            raise FileNotFoundError(source_path)
-        dest_dir = os.path.join(self.data_folder, account.id)
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = self._nonclashing_destination(dest_dir, os.path.basename(source_path))
-        shutil.copy2(source_path, dest)
-        return self.add_document(account, dest, statement_number,
-                                 date_issued, notes)
+        account.folder = self.relativise(absolute_path)  # raises if outside
+        self.save_account(account)
 
-    @staticmethod
-    def _nonclashing_destination(dest_dir: str, filename: str) -> str:
-        """Return a path in dest_dir that does not already exist."""
-        stem, ext = os.path.splitext(filename)
-        candidate = os.path.join(dest_dir, filename)
-        n = 2
-        while os.path.exists(candidate):
-            candidate = os.path.join(dest_dir, f"{stem}_{n}{ext}")
-            n += 1
-        return candidate
+    def clear_account_folder(self, account: Account) -> None:
+        account.folder = ""
+        self.save_account(account)
+
+    # ---- catalogue tags ----------------------------------------------
+    def set_catalogue(self, account: Account, filename: str,
+                      statement_number: str, date_issued: str,
+                      notes: str) -> None:
+        """Set (or clear) the catalogue tags for a filename within an account."""
+        cat = Catalogue(statement_number=statement_number,
+                        date_issued=date_issued.strip(), notes=notes)
+        if cat.is_empty():
+            account.catalogues.pop(filename, None)
+        else:
+            account.catalogues[filename] = cat
+        self.save_account(account)
+
+    # ---- read-only folder discovery ----------------------------------
+    def scan_account(self, account: Account) -> FolderScan:
+        """Read an account's folder and return its documents (read-only).
+
+        Documents are the top-level PDFs in the folder, merged with any stored
+        catalogue tags. Catalogue entries whose file is absent are appended as
+        missing documents (present=False) so their tags are still visible.
+        """
+        docs: list[Document] = []
+        has_subfolders = False
+        exists = False
+        seen: set[str] = set()
+
+        if account.folder:
+            abs_folder = self.absolutise(account.folder)
+            if os.path.isdir(abs_folder):
+                exists = True
+                try:
+                    entries = sorted(os.listdir(abs_folder))
+                except OSError:
+                    entries = []
+                for name in entries:
+                    full = os.path.join(abs_folder, name)
+                    if os.path.isdir(full):
+                        has_subfolders = True
+                        continue
+                    if os.path.splitext(name)[1].lower() in PDF_EXTS:
+                        cat = account.catalogues.get(name, Catalogue())
+                        docs.append(Document(
+                            filename=name,
+                            statement_number=cat.statement_number,
+                            date_issued=cat.date_issued,
+                            notes=cat.notes,
+                            present=True,
+                        ))
+                        seen.add(name)
+
+        # catalogued-but-missing files
+        for fname, cat in sorted(account.catalogues.items()):
+            if fname not in seen:
+                docs.append(Document(
+                    filename=fname,
+                    statement_number=cat.statement_number,
+                    date_issued=cat.date_issued,
+                    notes=cat.notes,
+                    present=False,
+                ))
+        return FolderScan(docs, has_subfolders, exists)
+
+    def document_path(self, account: Account, filename: str) -> str:
+        """Absolute path of a document file (for opening)."""
+        return self.absolutise(os.path.join(account.folder, filename))
 
     # ---- relative-path enforcement (against the DATA FOLDER) ---------
     def relativise(self, absolute_path: str) -> str:
-        """Return a path relative to the data folder, or raise.
-
-        Enforces the rule: a document MUST live inside the app-wide data folder.
-        """
         abs_path = os.path.abspath(absolute_path)
         base = self.data_folder
         try:
@@ -356,12 +394,11 @@ class Workspace:
         try:
             self.relativise(absolute_path)
             return True
-        except PathOutsideWorkspaceError:
+        except PathOutsideDataFolderError:
             return False
 
     # ---- derivation: zones -------------------------------------------
     def zones(self) -> list[Zone]:
-        """Derive Pane-1 zones from people x zoneblocks."""
         out: list[Zone] = []
         for zb in self.zoneblocks:
             if zb.scope in (SCOPE_INDIVIDUAL, SCOPE_BOTH):
@@ -400,16 +437,13 @@ class Workspace:
 
     # ---- freshness ---------------------------------------------------
     def newest_issue_date(self, account: Account) -> _dt.date | None:
-        dates = [d for d in (_parse_date(x.date_issued) for x in account.documents)
+        """Newest date_issued among the account's PRESENT documents."""
+        scan = self.scan_account(account)
+        dates = [d for d in (_parse_date(x.date_issued) for x in scan.documents)
                  if d is not None]
         return max(dates) if dates else None
 
     def is_fresh(self, account: Account, today: _dt.date | None = None) -> bool | None:
-        """Return True (fresh), False (stale), or None (not applicable).
-
-        Fresh iff (today - cycle_days) is chronologically prior to the newest
-        date_issued in the account. Non-periodic or unconfigured => None.
-        """
         if not account.periodic or account.cycle_days <= 0:
             return None
         today = today or _dt.date.today()
@@ -434,17 +468,22 @@ class Workspace:
     def validate(self) -> dict[str, list[str]]:
         problems: dict[str, list[str]] = {
             "orphan_accounts": [],
+            "missing_folders": [],
+            "outside_folders": [],
             "missing_files": [],
-            "outside_files": [],
         }
         valid_keys = {z.key for z in self.zones()}
         for a in self.accounts:
             if a.zone_key not in valid_keys:
                 problems["orphan_accounts"].append(f"{a.name} ({a.zone_key})")
-            for d in a.documents:
-                abs_path = self.absolutise(d.path)
-                if os.path.isabs(d.path) or not self.is_inside(abs_path):
-                    problems["outside_files"].append(f"{a.name}: {d.path}")
-                elif not os.path.exists(abs_path):
-                    problems["missing_files"].append(f"{a.name}: {d.path}")
+            if a.folder:
+                abs_folder = self.absolutise(a.folder)
+                if os.path.isabs(a.folder) or not self.is_inside(abs_folder):
+                    problems["outside_folders"].append(f"{a.name}: {a.folder}")
+                elif not os.path.isdir(abs_folder):
+                    problems["missing_folders"].append(f"{a.name}: {a.folder}")
+            scan = self.scan_account(a)
+            for d in scan.documents:
+                if not d.present:
+                    problems["missing_files"].append(f"{a.name}: {d.filename}")
         return problems

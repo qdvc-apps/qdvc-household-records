@@ -45,8 +45,8 @@ you get zones such as *Freja Bank Statements*, *Ludvig Bank Statements*,
 
 An account may be marked **periodic** with a **cycle (days)**. Its records are
 **fresh** if `today − cycle_days` is chronologically before the newest
-*date issued* of any of its documents; otherwise they are **stale**. Non-periodic
-accounts are not tracked for freshness.
+*date issued* among its documents (as currently found in its folder); otherwise
+they are **stale**. Non-periodic accounts are not tracked for freshness.
 
 ### Workspace folder vs data folder
 
@@ -55,22 +55,25 @@ These are two different things:
 - The **workspace folder** (chosen per workspace, opened from the File menu)
   holds this workspace's YAML catalogue files. You can keep several workspaces.
 - The **data folder** is a single, app-wide location (configured in
-  **Preferences**, stored in the app's XDG config) that holds all the PDFs
-  referenced by *every* workspace.
+  **Preferences**, stored in the app's XDG config) that holds the PDFs. The app
+  treats it as **read-only**: it never creates, moves, deletes, or modifies
+  anything inside it — it only reads. Think of it as possibly a read-only mount.
 
-When you add a file to an account, the app stores its path **relative to the
-data folder**, and you may only add files that live inside that data folder —
-files elsewhere are rejected. The default data folder is
+Each account is pointed at a **folder inside the data folder**. The top-level
+PDFs in that folder automatically become the account's documents — no more and
+no less. There is no importing or adding of files: to change an account's
+documents, change what's in its folder. Set an account's folder by right-click →
+"Set folder…" (or the "Set folder…" button) in the Accounts pane; the folder
+must be inside the data folder. The default data folder is
 `$XDG_DATA_HOME/qdvc-household-records/data` (usually
-`~/.local/share/qdvc-household-records/data`), and you can change it in
-Preferences.
+`~/.local/share/qdvc-household-records/data`), changeable in Preferences.
 
-In the Organiser, the Documents pane offers two ways to add a file: **Import…**
-copies a file from anywhere on disk into the data folder (under a subfolder named
-after the account) and then catalogues it, while **Link…** catalogues a file that
-is already inside the data folder. Selecting a document shows its catalogue but
-does not open it; use the **Open** button to launch the PDF. To change an
-account's periodic/cycle/notes settings, right-click it in the Accounts pane.
+Only PDFs directly in the folder are listed; if the folder contains subfolders,
+a warning appears and those are ignored. A file you had catalogued that later
+disappears from the folder is shown greyed as *missing*, with its tags kept.
+Selecting a document shows its catalogue (statement no., date issued, notes) but
+does not open it — use the **Open** button. To change an account's
+periodic/cycle/notes settings, right-click it in the Accounts pane.
 
 ## Requirements
 

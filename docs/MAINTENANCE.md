@@ -35,62 +35,50 @@ tests/                         Model tests + fake-gi import smoke test.
 
 ## Two folders: workspace vs data
 
-There are **two distinct locations**, and they are not the same thing:
-
 - **Workspace folder** — chosen per workspace; holds this workspace's YAML
-  (`household.yml`, `accounts/*.yml`). You may have several workspaces.
-- **Data folder** — a single, app-wide location configured in the XDG config
-  (`data_folder` key; default `$XDG_DATA_HOME/qdvc-household-records/data`).
-  It holds all the PDFs referenced by *every* workspace. Every document path is
-  stored **relative to the data folder**, and a file can only be added as a
-  document if it lives inside the data folder.
+  (`household.yml`, `accounts/*.yml`). The app reads and writes here.
+- **Data folder** — a single, app-wide location configured in Preferences
+  (`data_folder` key; default `$XDG_DATA_HOME/qdvc-household-records/data`). It
+  holds the PDFs. **The app treats the data folder as strictly read-only: it
+  never creates, moves, deletes, or modifies anything inside it**, and it does
+  not even create the folder itself. Assume it may be a read-only mount.
 
-The data folder is configured in the Setup tab; the current workspace folder is
-shown there too (info + open/change button).
+## Folder-based documents (no importing)
+
+An account points at a **folder** (stored relative to the data folder). The
+top-level PDFs directly inside that folder ARE the account's documents,
+discovered by `Workspace.scan_account`. There is no import/link/add-file/remove
+concept — the folder's contents define the document set, no more and no less.
+
+- Discovery is **top-level only**; if subfolders are present, `scan_account`
+  sets `has_subfolders=True` and the UI shows a warning bar in Pane 3.
+- Catalogue tags (statement no., date issued, notes) are stored in the account
+  YAML keyed **by filename**. A catalogue entry whose file is absent from the
+  folder is surfaced as a *missing* document (`present=False`) with its tags
+  retained and shown greyed.
 
 ## Data formats
 
-Inside a workspace folder:
-
-```
-<workspace>/
-    household.yml              people + zoneblocks (Setup-tab config)
-    accounts/
-        <account_id>.yml       one file per account, documents nested inside
-```
-
-The PDFs themselves live under the separate **data folder**, not here.
-
-`household.yml` — IDs are slugified snake_case, derived from the name:
-
-```yaml
-people:
-  - {id: freja, name: Freja}
-  - {id: ludvig, name: Ludvig}
-zoneblocks:
-  - {id: bank_statements, name: Bank Statements, scope: both, icon: accessories-calculator-symbolic}
-```
-
-`accounts/freja_bank_of_atlantis.yml` — the file name IS the account id, which
-combines the owner id (person id or `shared`) with the snake_case account name:
+`accounts/<id>.yml`:
 
 ```yaml
 id: freja_bank_of_atlantis
-zone_key: bank_statements::freja       # zoneblock_id::person_id (or ::shared)
+zone_key: bank_statements::freja
 name: Bank of Atlantis
+folder: freja/bank-of-atlantis     # RELATIVE to the data folder
 periodic: true
 cycle_days: 30
 notes: ""
-documents:
-  - id: doc-1a2b3c4d5e6f              # documents keep random ids (no name key)
-    path: statements/2026-01.pdf       # RELATIVE to the DATA FOLDER
+catalogues:                        # keyed by filename; empty entries omitted
+  - filename: "2026-01.pdf"
     statement_number: "001"
     date_issued: "2026-01-31"
     notes: ""
 ```
 
-Colliding slugs are de-duplicated with a numeric suffix (`freja_2`,
-`freja_bank_of_atlantis_2`). All writes are atomic (temp file + `os.replace`).
+Colliding slugs are de-duplicated with a numeric suffix. All WORKSPACE writes
+are atomic (temp file + `os.replace`); nothing in the data folder is ever
+written.
 
 ## Model / load pipeline
 
@@ -105,30 +93,32 @@ derived, never stored; accounts attach to a zone by its stable `zone_key`.
 - `add_person / remove_person / update_person`
 - `add_zoneblock / remove_zoneblock / update_zoneblock`
 - `add_account`, `save_account`, `delete_account`, `update_account_settings`
-- `add_document(account, absolute_path, …)` — *link*: catalogue a file that is
-  already inside the data folder (enforces relative path)
-- `import_document(account, source_path, …)` — *import*: copy a file from
-  anywhere into `<data_folder>/<account_id>/` (numeric suffix on name clash),
-  then catalogue it
-- `remove_document`
+- `set_account_folder(account, absolute_path)` — point at a folder inside the
+  data folder (enforces containment); `clear_account_folder`
+- `scan_account(account)` → `FolderScan(documents, has_subfolders, exists)`,
+  read-only top-level PDF discovery merged with catalogue tags
+- `set_catalogue(account, filename, stmt, date, notes)` — store/clear tags
+- `document_path(account, filename)` — absolute path for opening
+- `remove_document`  *(removed — folder contents define the document set)*
 - `relativise / absolutise / is_inside`
 - `is_fresh(account)` → True/False/None; `fresh_and_stale()`
 - `validate()` → categorised problem lists
 
-## Relative-path enforcement
+## Read-only data folder & containment
 
-`add_document` calls `relativise`, which uses `os.path.commonpath` to reject any
-file whose absolute path is not inside the **data folder**, raising
-`PathOutsideDataFolderError` (aliased as `PathOutsideWorkspaceError` for
-compatibility). Both front-ends catch it and show an error, and their file
-choosers open rooted at the data folder. Changing the data folder in Setup
-re-opens the current workspace against the new folder.
+`set_account_folder` calls `relativise`, which uses `os.path.commonpath` to
+reject any folder not inside the data folder (`PathOutsideDataFolderError`).
+Beyond that, the workspace layer performs **no writes to the data folder at
+all** — discovery (`scan_account`) only lists and reads. Opening a document
+hands its absolute path to the OS default handler; the app itself never writes.
 
 ## Freshness rule
 
 `is_fresh` returns `None` for non-periodic / unconfigured accounts, `False` when
-there are no dated documents, else `True` iff
-`today − timedelta(cycle_days) < newest date_issued`.
+there are no dated (present) documents, else `True` iff
+`today − timedelta(cycle_days) < newest date_issued`. The newest date is taken
+over the account's *discovered, present* documents (via `scan_account`), so it
+reflects the current folder contents.
 
 ## UI layer
 
@@ -145,7 +135,16 @@ Dates (a document's *date issued*) are entered with a calendar picker dialog
 rather than a free-text field; the value is still stored as ISO `YYYY-MM-DD`.
 
 Clicking a document in Pane 3 only selects it (showing its catalogue in Pane 4);
-it does not open the PDF. Use the "Open" button to launch the file.
+it does not open the PDF. Use the "Open" button to launch the file. Documents
+are the top-level PDFs in the account's folder; there is no import/add. Set an
+account's folder via right-click → "Set folder…" (or the "Set folder…" button).
+Missing catalogued files are shown greyed, and a warning bar appears atop Pane 3
+if the folder has subfolders.
+
+In **GTK4**, Pane 1 (zones) is a sidebar via `Adw.OverlaySplitView`, toggled by
+a header button shown only on the Organiser page. Panes 2 and 3 (accounts,
+documents) sit in a `Gtk.Paned` whose start child has `resize=False`, so the
+divider stays put and the panes don't auto-resize while navigating.
 
 The **data folder** is app-wide and configured in Preferences (Edit →
 Preferences in GTK3; primary menu → Preferences in GTK4), not in the Setup tab,
@@ -156,8 +155,10 @@ a right-click context menu with an "Add…" button beneath.
 
 ## Common maintenance tasks — where to touch
 
-- **New document field:** add to `models.Document`, the load/save dicts in
-  `workspace.py`, and Pane 4 in both `*_organiser_*` modules.
+- **New document/catalogue field:** add to `models.Catalogue` (and `Document`
+  if it's a display field), the load/save in `workspace.py` (`_load_accounts`,
+  `save_account`, and the merge in `scan_account`), and Pane 4 in both
+  `*_organiser_*` modules.
 - **New freshness logic:** edit `Workspace.is_fresh` only.
 - **New shortcut/command:** add to `ui_prefs.SHORTCUTS`, wire in
   `gtk3_shortcuts.py` and `gtk4_actions.py`, add to both menus.

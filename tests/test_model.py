@@ -4,7 +4,7 @@ import os
 import tempfile
 
 from qdvc.models import SCOPE_BOTH, SCOPE_INDIVIDUAL, SCOPE_SHARED
-from qdvc.workspace import PathOutsideWorkspaceError, Workspace
+from qdvc.workspace import PathOutsideDataFolderError, Workspace
 
 
 def build():
@@ -19,12 +19,17 @@ def build():
     return d, ws
 
 
+def _make_pdf(folder, name, text="x"):
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, name), "w") as fh:
+        fh.write(text)
+
+
 def test_slug_ids():
     _d, ws = build()
     assert {p.id for p in ws.people} == {"freja", "ludvig"}
     ids = {z.id for z in ws.zoneblocks}
     assert "bank_statements" in ids and "payslips" in ids
-    # duplicate person name gets deduped
     p = ws.add_person("Freja")
     assert p.id == "freja_2"
 
@@ -37,78 +42,78 @@ def test_account_id_from_owner_and_name():
     zk_shared = next(z.key for z in ws.zones() if z.label == "Shared Electricity")
     sacc = ws.add_account(zk_shared, "Powerplant Atlantica")
     assert sacc.id == "shared_powerplant_atlantica"
-    # the YAML file is named after the id
     assert os.path.exists(os.path.join(ws.root, "accounts",
                                        "freja_bank_of_atlantis.yml"))
 
 
-def test_zone_derivation():
-    _d, ws = build()
-    labels = {z.label for z in ws.zones()}
-    assert "Freja Bank Statements" in labels
-    assert "Shared Bank Statements" in labels
-    assert "Ludvig Payslips" in labels
-    assert "Shared Payslips" not in labels
-    assert "Shared Electricity" in labels
-    assert "Freja Electricity" not in labels
-
-
-def test_freshness():
-    _d, ws = build()
-    zk = next(z.key for z in ws.zones() if z.label == "Freja Bank Statements")
-    acc = ws.add_account(zk, "Bank of Atlantis", periodic=True, cycle_days=30)
-    assert ws.is_fresh(acc) is False  # no documents
-    fp = os.path.join(ws.data_folder, "s.pdf")  # inside the DATA folder
-    open(fp, "w").write("x")
-    recent = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
-    ws.add_document(acc, fp, date_issued=recent)
-    assert ws.is_fresh(acc) is True
-    acc.documents[0].date_issued = (
-        datetime.date.today() - datetime.timedelta(days=90)).isoformat()
-    ws.save_account(acc)
-    assert ws.is_fresh(acc) is False
-    acc.periodic = False
-    assert ws.is_fresh(acc) is None
-
-
-def test_relative_path_enforcement():
+def test_folder_discovery_toplevel_and_subfolders():
     _d, ws = build()
     zk = next(z.key for z in ws.zones() if z.label == "Shared Electricity")
     acc = ws.add_account(zk, "Powerplant Atlantica")
-    # a file inside the data folder is accepted and stored relative to it
-    fp = os.path.join(ws.data_folder, "bill.pdf")
-    open(fp, "w").write("x")
-    doc = ws.add_document(acc, fp)
-    assert doc.path == "bill.pdf"
-    assert not os.path.isabs(doc.path)
-    # a file inside the WORKSPACE (but not the data folder) is rejected
-    inside_ws = os.path.join(ws.root, "stray.pdf")
-    open(inside_ws, "w").write("y")
+    folder = os.path.join(ws.data_folder, "electricity")
+    _make_pdf(folder, "jan.pdf")
+    _make_pdf(folder, "feb.pdf")
+    _make_pdf(folder, "notes.txt")          # ignored (not a PDF)
+    os.makedirs(os.path.join(folder, "archive"), exist_ok=True)  # subfolder
+    _make_pdf(os.path.join(folder, "archive"), "old.pdf")        # not discovered
+    ws.set_account_folder(acc, folder)
+
+    scan = ws.scan_account(acc)
+    names = sorted(d.filename for d in scan.documents)
+    assert names == ["feb.pdf", "jan.pdf"]   # top-level PDFs only
+    assert scan.has_subfolders is True
+    assert scan.exists is True
+
+
+def test_folder_must_be_inside_data_folder():
+    _d, ws = build()
+    zk = next(z.key for z in ws.zones() if z.label == "Freja Payslips")
+    acc = ws.add_account(zk, "Employer")
+    outside = tempfile.mkdtemp()  # not inside the data folder
     try:
-        ws.add_document(acc, inside_ws)
+        ws.set_account_folder(acc, outside)
         assert False, "expected PathOutsideDataFolderError"
-    except PathOutsideWorkspaceError:  # alias of PathOutsideDataFolderError
+    except PathOutsideDataFolderError:
         pass
 
 
-def test_import_document_copies_into_data_folder():
+def test_catalogue_by_filename_and_missing():
     _d, ws = build()
-    zk = next(z.key for z in ws.zones() if z.label == "Shared Electricity")
-    acc = ws.add_account(zk, "Powerplant Atlantica")
-    # a source file OUTSIDE the data folder
-    src_dir = tempfile.mkdtemp()
-    src = os.path.join(src_dir, "invoice.pdf")
-    open(src, "w").write("data")
-    doc = ws.import_document(acc, src, statement_number="A1")
-    # stored relative to the data folder, under the account id
-    assert doc.path == os.path.join(acc.id, "invoice.pdf")
-    assert os.path.exists(os.path.join(ws.data_folder, doc.path))
-    assert doc.statement_number == "A1"
-    # importing a second file with the same name does not clobber the first
-    src2 = os.path.join(src_dir, "invoice.pdf")  # same basename
-    doc2 = ws.import_document(acc, src2)
-    assert doc2.path == os.path.join(acc.id, "invoice_2.pdf")
-    assert os.path.exists(os.path.join(ws.data_folder, doc2.path))
+    zk = next(z.key for z in ws.zones() if z.label == "Freja Bank Statements")
+    acc = ws.add_account(zk, "Bank of Atlantis")
+    folder = os.path.join(ws.data_folder, "freja_bank")
+    _make_pdf(folder, "2026-01.pdf")
+    ws.set_account_folder(acc, folder)
+    ws.set_catalogue(acc, "2026-01.pdf", "001", "2026-01-31", "first")
+    # reload from disk: tag persists, keyed by filename
+    ws2 = Workspace.load(_d, ws.data_folder)
+    acc2 = ws2.account_by_id(acc.id)
+    scan = ws2.scan_account(acc2)
+    doc = next(d for d in scan.documents if d.filename == "2026-01.pdf")
+    assert doc.statement_number == "001" and doc.present is True
+    # remove the file -> catalogued-but-missing, tags retained, present False
+    os.remove(os.path.join(folder, "2026-01.pdf"))
+    scan2 = ws2.scan_account(acc2)
+    missing = next(d for d in scan2.documents if d.filename == "2026-01.pdf")
+    assert missing.present is False and missing.date_issued == "2026-01-31"
+
+
+def test_freshness_uses_discovered_docs():
+    _d, ws = build()
+    zk = next(z.key for z in ws.zones() if z.label == "Freja Bank Statements")
+    acc = ws.add_account(zk, "Bank of Atlantis", periodic=True, cycle_days=30)
+    folder = os.path.join(ws.data_folder, "freja_bank2")
+    _make_pdf(folder, "s.pdf")
+    ws.set_account_folder(acc, folder)
+    assert ws.is_fresh(acc) is False  # no dated docs yet
+    recent = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
+    ws.set_catalogue(acc, "s.pdf", "", recent, "")
+    assert ws.is_fresh(acc) is True
+    old = (datetime.date.today() - datetime.timedelta(days=90)).isoformat()
+    ws.set_catalogue(acc, "s.pdf", "", old, "")
+    assert ws.is_fresh(acc) is False
+    acc.periodic = False
+    assert ws.is_fresh(acc) is None
 
 
 def test_update_methods():
@@ -127,6 +132,22 @@ def test_update_methods():
     assert reloaded.notes == "quarterly-ish"
 
 
+def test_app_never_writes_data_folder():
+    d = tempfile.mkdtemp()
+    data = os.path.join(tempfile.mkdtemp(), "readonly-data")  # does NOT exist
+    ws = Workspace.create(d, data)          # must not create the data folder
+    assert not os.path.exists(data)
+    zk = ws.zones()[0].key if ws.zones() else None
+    # set up minimal config so a zone exists
+    ws.add_person("Freja")
+    ws.add_zoneblock("Bank Statements", SCOPE_BOTH, "folder-symbolic")
+    zk = next(z.key for z in ws.zones() if z.person_id is None)
+    acc = ws.add_account(zk, "Bank")
+    # pointing at a (missing) subpath must not create anything
+    scan = ws.scan_account(acc)
+    assert scan.documents == [] and not os.path.exists(data)
+
+
 def test_reload_roundtrip():
     d, ws = build()
     data = ws.data_folder
@@ -137,6 +158,17 @@ def test_reload_roundtrip():
     assert len(ws2.zoneblocks) == 3
     assert len(ws2.accounts) == 1
     assert ws2.data_folder == os.path.abspath(data)
+
+
+def test_zone_derivation():
+    _d, ws = build()
+    labels = {z.label for z in ws.zones()}
+    assert "Freja Bank Statements" in labels
+    assert "Shared Bank Statements" in labels
+    assert "Ludvig Payslips" in labels
+    assert "Shared Payslips" not in labels
+    assert "Shared Electricity" in labels
+    assert "Freja Electricity" not in labels
 
 
 if __name__ == "__main__":

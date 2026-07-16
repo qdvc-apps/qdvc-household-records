@@ -70,8 +70,9 @@ def iso_ymd(value: str) -> tuple[int, int, int] | None:
 def format_validation_report(problems: dict[str, list[str]]) -> str:
     titles = {
         "orphan_accounts": "Accounts whose zone no longer exists",
-        "outside_files": "Files stored outside the data folder",
-        "missing_files": "Referenced files that are missing",
+        "outside_folders": "Account folders outside the data folder",
+        "missing_folders": "Account folders that no longer exist",
+        "missing_files": "Catalogued files no longer in their folder",
     }
     lines: list[str] = []
     total = 0

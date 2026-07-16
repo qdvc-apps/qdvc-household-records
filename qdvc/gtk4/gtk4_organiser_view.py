@@ -83,14 +83,18 @@ class OrganiserView(Adw.Bin):
         outer.append(self.master_paned)
 
         outer.append(Gtk.Separator())
-        catalogue = self._pane("File catalogue", self._build_catalogue_pane())
-        catalogue.set_size_request(300, -1)
+        catalogue = self._pane("File catalogue", self._build_catalogue_pane(),
+                               expand=False)
+        # As narrow as possible while keeping all rows fully usable.
+        catalogue.set_hexpand(False)
+        catalogue.set_halign(Gtk.Align.FILL)
+        catalogue.set_size_request(240, -1)
         outer.append(catalogue)
         return outer
 
-    def _pane(self, title: str, child) -> Gtk.Widget:
+    def _pane(self, title: str, child, expand: bool = True) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        box.set_hexpand(True)
+        box.set_hexpand(expand)
         box.set_margin_top(8); box.set_margin_bottom(8)
         box.set_margin_start(8); box.set_margin_end(8)
         lbl = Gtk.Label(label=title, xalign=0.0)
@@ -119,14 +123,6 @@ class OrganiserView(Adw.Bin):
         empty_gesture.connect("pressed", self._on_account_blank_right_click)
         self.account_list.add_controller(empty_gesture)
         box.append(scroller)
-
-        hint = Gtk.Label(
-            label="Right-click a zone or the account list to add an account. "
-                  "Right-click an account for settings and folder options.",
-            xalign=0.0)
-        hint.add_css_class("dim-label")
-        hint.set_wrap(True)
-        box.append(hint)
         return box
 
     # ---- Pane 3: documents ------------------------------------------

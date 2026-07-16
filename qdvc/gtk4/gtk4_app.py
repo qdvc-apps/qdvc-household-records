@@ -13,7 +13,7 @@ from ..ui_prefs import SHORTCUTS  # noqa: E402
 
 GLib.set_prgname(f"qdvc-{APP_SHORT}")
 
-ICON_NAME = "folder-documents"
+ICON_NAME = "emblem-mail"
 
 
 class HouseholdApp(Adw.Application):

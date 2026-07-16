@@ -24,6 +24,7 @@ mechanics.
 | Sidebar width     | natural (tree column)                       | pinned min==max to fit longest label; never auto-resizes |
 | Add account       | right-click zone row or Pane-2 blank space → menu | right-click zone row or Pane-2 blank space → popover menu |
 | Organiser P2/P3   | `Gtk.Paned` chain                           | `Gtk.Paned`, start child `resize=False` (no auto-resize)|
+| Organiser Pane 4  | column in the `Gtk.Paned` chain             | non-expanding box, `size_request(240,-1)` — as narrow as its rows allow |
 | Documents source  | top-level PDFs in the account's folder      | same (shared core `scan_account`)                       |
 | Pane 3 rows       | pixbuf `application-pdf` + `document_label` (single column, no filename) | `application-pdf` image + `document_label` (single line, no filename) |
 | Open button       | `Gtk.Image` `application-pdf` + label        | `Adw.ButtonContent` icon `application-pdf` + label      |
@@ -48,9 +49,18 @@ mechanics.
 ## Window placement
 
 The GTK3 window calls `set_position(Gtk.WindowPosition.CENTER)` so it opens
-centred. GTK4 has no application-level window-positioning API — placement is the
-compositor's responsibility — so the GTK4 window does not attempt to centre
-itself. Both restore the saved size from the `window` config key.
+centred. GTK4 has no portable window-positioning API, so `MainWindow` centres on
+a best-effort basis: on `realize`, if the display is X11 it computes the monitor
+geometry and moves the toplevel via `XMoveWindow` (libX11 through `ctypes`). On
+Wayland — where the compositor owns placement — and anywhere the move can't be
+performed, `_center_on_realize` is a graceful no-op wrapped in try/except. Both
+front-ends restore the saved size from the `window` config key.
+
+## Window icon
+
+Both front-ends use the themed icon `emblem-mail` (`ICON_NAME` in each
+`*_app.py`), also set in the `.desktop` launcher. A user-configured `custom_icon`
+still overrides it in GTK3 with a graceful fallback.
 
 ## Parity notes
 

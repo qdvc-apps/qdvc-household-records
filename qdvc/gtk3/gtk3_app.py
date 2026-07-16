@@ -12,7 +12,7 @@ from ..config import Config  # noqa: E402
 GLib.set_prgname(f"qdvc-{APP_SHORT}")
 
 # Themed freedesktop icon; overridable here.
-ICON_NAME = "folder-documents"
+ICON_NAME = "emblem-mail"
 
 
 class HouseholdApp(Gtk.Application):

@@ -27,6 +27,9 @@ class MainWindow(Adw.ApplicationWindow):
         w, h = self.config.get("window", [1000, 680])
         self.set_default_size(int(w), int(h))
         self.connect("close-request", self._on_close)
+        # Center on launch where the platform allows it (X11); on Wayland the
+        # compositor owns placement and this is a graceful no-op.
+        self.connect("realize", self._center_on_realize)
 
         install_actions(self)
 
@@ -195,6 +198,45 @@ class MainWindow(Adw.ApplicationWindow):
         dlg = Adw.MessageDialog(transient_for=self, heading=title, body=text)
         dlg.add_response("ok", "OK")
         dlg.present()
+
+    def _center_on_realize(self, *_a) -> None:
+        """Best-effort center on X11. On Wayland (compositor-managed) or if the
+        Xlib move isn't available, silently do nothing."""
+        try:
+            display = self.get_display()
+            surface = self.get_surface()
+            if type(display).__name__ != "X11Display" or surface is None:
+                return
+            monitor = display.get_monitor_at_surface(surface)
+            if monitor is None:
+                return
+            geo = monitor.get_geometry()
+            w, h = self.get_default_size()
+            if w <= 0 or h <= 0:
+                w, h = self.config.get("window", [1000, 680])
+            x = geo.x + max(0, (geo.width - int(w)) // 2)
+            y = geo.y + max(0, (geo.height - int(h)) // 2)
+            self._x11_move(display, surface, x, y)
+        except Exception:
+            return  # leave placement to the WM
+
+    @staticmethod
+    def _x11_move(display, xsurface, x: int, y: int) -> None:
+        """Move an X11 toplevel via libX11 XMoveWindow (best-effort)."""
+        try:
+            import ctypes
+            xid = xsurface.get_xid()
+            xlib = ctypes.CDLL("libX11.so.6")
+            # Open the default display by name from the GDK display.
+            name = display.get_name()
+            dpy = xlib.XOpenDisplay(name.encode("utf-8") if name else None)
+            if not dpy:
+                return
+            xlib.XMoveWindow(dpy, xid, int(x), int(y))
+            xlib.XFlush(dpy)
+            xlib.XCloseDisplay(dpy)
+        except Exception:
+            return
 
     def _on_close(self, *_a) -> bool:
         self.config.set("window", [self.get_width(), self.get_height()])

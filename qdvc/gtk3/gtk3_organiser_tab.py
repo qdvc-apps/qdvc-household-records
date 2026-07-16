@@ -80,14 +80,6 @@ class OrganiserTab(Gtk.Box):
                                                    self._on_account_selected)
         self.account_view.connect("button-press-event", self._on_account_click)
         box.pack_start(self._scrolled(self.account_view), True, True, 0)
-
-        hint = Gtk.Label(
-            label="Right-click a zone or the account list to add an account. "
-                  "Right-click an account for settings and folder options.",
-            xalign=0.0)
-        hint.get_style_context().add_class("dim-label")
-        hint.set_line_wrap(True)
-        box.pack_start(hint, False, False, 0)
         return box
 
     # ---- Pane 3: documents ------------------------------------------

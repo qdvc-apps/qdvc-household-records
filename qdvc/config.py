@@ -21,6 +21,8 @@ DEFAULTS: dict[str, Any] = {
     "ui_backend": "gtk3",             # "gtk3" | "gtk4"
     "file_manager": "",               # optional template with {dir}/{file}
     "custom_icon": None,              # optional absolute path to png/svg
+    "data_folder": None,             # app-wide PDF store; shared across all
+                                     # workspaces. None => default under XDG.
 }
 
 _VALID_BACKENDS = {"gtk3", "gtk4"}
@@ -30,6 +32,11 @@ _VALID_TOOLBAR = {"both", "beside"}
 def _config_dir() -> str:
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     return os.path.join(base, f"qdvc-{APP_SHORT}")
+
+
+def _default_data_dir() -> str:
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, f"qdvc-{APP_SHORT}", "data")
 
 
 def _config_path() -> str:
@@ -96,6 +103,22 @@ class Config:
     def toolbar_style(self, value: str) -> None:
         val = str(value).strip().lower()
         self.set("toolbar_style", val if val in _VALID_TOOLBAR else "both")
+
+    @property
+    def data_folder(self) -> str:
+        """App-wide folder holding PDFs referenced across all workspaces.
+
+        Falls back to the default XDG location when unset. The directory is
+        created on read so callers can rely on it existing.
+        """
+        value = self.get("data_folder")
+        path = value if value else _default_data_dir()
+        os.makedirs(path, exist_ok=True)
+        return os.path.abspath(path)
+
+    @data_folder.setter
+    def data_folder(self, value: str) -> None:
+        self.set("data_folder", os.path.abspath(value) if value else None)
 
     def push_recent(self, path: str, limit: int = 8) -> None:
         recent = [p for p in self.get("recent_workspaces", []) if p != path]

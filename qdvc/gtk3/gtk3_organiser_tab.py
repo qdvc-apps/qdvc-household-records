@@ -125,12 +125,19 @@ class OrganiserTab(Gtk.Box):
         box.pack_start(self._scrolled(self.doc_view), True, True, 0)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self.add_doc_btn = Gtk.Button(label="Add file…")
+        self.import_doc_btn = Gtk.Button(label="Import…")
+        self.import_doc_btn.set_tooltip_text(
+            "Copy a file from anywhere into the data folder and catalogue it")
+        self.import_doc_btn.connect("clicked", self._on_import_document)
+        self.add_doc_btn = Gtk.Button(label="Link…")
+        self.add_doc_btn.set_tooltip_text(
+            "Catalogue a file that is already inside the data folder")
         self.add_doc_btn.connect("clicked", self._on_add_document)
         self.open_doc_btn = Gtk.Button(label="Open")
         self.open_doc_btn.connect("clicked", lambda *_: self._open_current_doc())
         self.del_doc_btn = Gtk.Button(label="Remove")
         self.del_doc_btn.connect("clicked", self._on_remove_document)
+        row.pack_start(self.import_doc_btn, True, True, 0)
         row.pack_start(self.add_doc_btn, True, True, 0)
         row.pack_start(self.open_doc_btn, False, False, 0)
         row.pack_start(self.del_doc_btn, False, False, 0)
@@ -332,10 +339,10 @@ class OrganiserTab(Gtk.Box):
         if not ws or not self._current_account:
             return
         dlg = Gtk.FileChooserDialog(
-            title="Choose a file inside the workspace", parent=self.window,
+            title="Choose a file inside the data folder", parent=self.window,
             action=Gtk.FileChooserAction.OPEN)
         dlg.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Add", Gtk.ResponseType.OK)
-        dlg.set_current_folder(ws.root)
+        dlg.set_current_folder(ws.data_folder)
         flt = Gtk.FileFilter(); flt.set_name("PDF documents"); flt.add_pattern("*.pdf")
         dlg.add_filter(flt)
         allf = Gtk.FileFilter(); allf.set_name("All files"); allf.add_pattern("*")
@@ -347,8 +354,34 @@ class OrganiserTab(Gtk.Box):
                 ws.add_document(self._current_account, path)
             except PathOutsideWorkspaceError:
                 self.window._error(
-                    "That file is outside the workspace data folder.\n"
-                    "Only files inside the workspace can be added as documents.")
+                    "That file is outside the data folder.\n"
+                    "Only files inside the data folder can be added as "
+                    "documents. You can change the data folder in the Setup tab.")
+                return
+            self._reload_documents()
+        else:
+            dlg.destroy()
+
+    def _on_import_document(self, *_a) -> None:
+        ws = self._ws()
+        if not ws or not self._current_account:
+            return
+        dlg = Gtk.FileChooserDialog(
+            title="Choose a file to import into the data folder",
+            parent=self.window, action=Gtk.FileChooserAction.OPEN)
+        dlg.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
+                        "Import", Gtk.ResponseType.OK)
+        flt = Gtk.FileFilter(); flt.set_name("PDF documents"); flt.add_pattern("*.pdf")
+        dlg.add_filter(flt)
+        allf = Gtk.FileFilter(); allf.set_name("All files"); allf.add_pattern("*")
+        dlg.add_filter(allf)
+        if dlg.run() == Gtk.ResponseType.OK:
+            path = dlg.get_filename()
+            dlg.destroy()
+            try:
+                ws.import_document(self._current_account, path)
+            except OSError as exc:
+                self.window._error(f"Could not import the file:\n{exc}")
                 return
             self._reload_documents()
         else:
@@ -371,6 +404,7 @@ class OrganiserTab(Gtk.Box):
         has_doc = self._current_document is not None
         self.add_account_btn.set_sensitive(has_zone)
         self.del_account_btn.set_sensitive(has_acc)
+        self.import_doc_btn.set_sensitive(has_acc)
         self.add_doc_btn.set_sensitive(has_acc)
         self.open_doc_btn.set_sensitive(has_doc)
         self.del_doc_btn.set_sensitive(has_doc)

@@ -37,6 +37,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.set_icon_name(ICON_NAME)
         w, h = self.config.get("window", [1000, 680])
         self.set_default_size(int(w), int(h))
+        self.set_position(Gtk.WindowPosition.CENTER)
         self.connect("delete-event", self._on_delete)
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -137,7 +138,7 @@ class MainWindow(Gtk.ApplicationWindow):
         if dlg.run() == Gtk.ResponseType.OK:
             path = dlg.get_filename()
             dlg.destroy()
-            Workspace.create(path)
+            Workspace.create(path, self.config.data_folder)
             self.open_workspace(path)
         else:
             dlg.destroy()
@@ -157,7 +158,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def open_workspace(self, path: str) -> None:
         try:
-            self.workspace = Workspace.load(path)
+            self.workspace = Workspace.load(path, self.config.data_folder)
         except Exception as exc:
             self._error(f"Could not open workspace:\n{exc}")
             return

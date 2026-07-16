@@ -31,6 +31,13 @@ mechanics.
 - Freshness labels and date formatting come from `ui_prefs` in both — no
   toolkit-specific formatting.
 
+## Window placement
+
+The GTK3 window calls `set_position(Gtk.WindowPosition.CENTER)` so it opens
+centred. GTK4 has no application-level window-positioning API — placement is the
+compositor's responsibility — so the GTK4 window does not attempt to centre
+itself. Both restore the saved size from the `window` config key.
+
 ## Parity notes
 
 - `F2 rename` is marked GTK3-specific in `SHORTCUTS`; there is no rename command

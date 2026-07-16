@@ -103,7 +103,7 @@ class MainWindow(Adw.ApplicationWindow):
         except Exception:
             return
         path = folder.get_path()
-        Workspace.create(path)
+        Workspace.create(path, self.config.data_folder)
         self.open_workspace(path)
 
     def action_open_workspace(self) -> None:
@@ -119,7 +119,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def open_workspace(self, path: str) -> None:
         try:
-            self.workspace = Workspace.load(path)
+            self.workspace = Workspace.load(path, self.config.data_folder)
         except Exception as exc:
             self._error(f"Could not open workspace: {exc}")
             return

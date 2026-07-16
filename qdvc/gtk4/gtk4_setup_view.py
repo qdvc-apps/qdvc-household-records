@@ -25,8 +25,22 @@ class SetupView(Gtk.ScrolledWindow):
         box.set_margin_start(12); box.set_margin_end(12)
         clamp.set_child(box)
 
-        # data folder
-        folder_group = Adw.PreferencesGroup(title="Workspace data folder")
+        # data folder (app-wide PDF store, shared across workspaces)
+        data_group = Adw.PreferencesGroup(
+            title="Data folder",
+            description="Shared across all workspaces. Every PDF must live "
+                        "inside this folder; document paths are stored relative "
+                        "to it.")
+        self.data_row = Adw.ActionRow(title="Folder", subtitle="")
+        dbtn = Gtk.Button(label="Change…")
+        dbtn.set_valign(Gtk.Align.CENTER)
+        dbtn.connect("clicked", self._on_change_data_folder)
+        self.data_row.add_suffix(dbtn)
+        data_group.add(self.data_row)
+        box.append(data_group)
+
+        # current workspace folder (info only)
+        folder_group = Adw.PreferencesGroup(title="Current workspace folder")
         self.folder_row = Adw.ActionRow(title="Folder", subtitle="(no workspace open)")
         btn = Gtk.Button(label="Open / Change…")
         btn.set_valign(Gtk.Align.CENTER)
@@ -61,6 +75,24 @@ class SetupView(Gtk.ScrolledWindow):
         self._people_rows: list = []
         self._zb_rows: list = []
 
+    def _on_change_data_folder(self, *_a) -> None:
+        from gi.repository import Gio
+        dlg = Gtk.FileDialog(title="Choose the data folder")
+        dlg.set_initial_folder(
+            Gio.File.new_for_path(self.window.config.data_folder))
+        dlg.select_folder(self.window, None, self._on_data_folder_chosen)
+
+    def _on_data_folder_chosen(self, dlg, result) -> None:
+        try:
+            folder = dlg.select_folder_finish(result)
+        except Exception:
+            return
+        self.window.config.data_folder = folder.get_path()
+        if self.window.workspace:
+            self.window.open_workspace(self.window.workspace.root)
+        else:
+            self.refresh()
+
     def _on_add_person(self, entry) -> None:
         ws = self.window.workspace
         name = entry.get_text().strip()
@@ -93,6 +125,7 @@ class SetupView(Gtk.ScrolledWindow):
 
     def refresh(self) -> None:
         ws = self.window.workspace
+        self.data_row.set_subtitle(self.window.config.data_folder)
         self.folder_row.set_subtitle(ws.root if ws else "(no workspace open)")
         for r in self._people_rows:
             self.people_group.remove(r)

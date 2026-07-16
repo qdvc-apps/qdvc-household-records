@@ -49,7 +49,7 @@ def format_date(value: str) -> str:
 def format_validation_report(problems: dict[str, list[str]]) -> str:
     titles = {
         "orphan_accounts": "Accounts whose zone no longer exists",
-        "outside_files": "Files stored outside the workspace",
+        "outside_files": "Files stored outside the data folder",
         "missing_files": "Referenced files that are missing",
     }
     lines: list[str] = []

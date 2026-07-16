@@ -97,14 +97,20 @@ class OrganiserView(Gtk.Box):
         box.append(self._scrolled(self.doc_list))
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self.add_doc_btn = Gtk.Button(label="Add file…")
+        self.import_doc_btn = Gtk.Button(label="Import…")
+        self.import_doc_btn.set_tooltip_text(
+            "Copy a file from anywhere into the data folder and catalogue it")
+        self.import_doc_btn.connect("clicked", self._on_import_document)
+        self.add_doc_btn = Gtk.Button(label="Link…")
+        self.add_doc_btn.set_tooltip_text(
+            "Catalogue a file that is already inside the data folder")
         self.add_doc_btn.connect("clicked", self._on_add_document)
         self.open_doc_btn = Gtk.Button(label="Open")
         self.open_doc_btn.connect("clicked", lambda *_: self._open_doc())
         self.del_doc_btn = Gtk.Button(label="Remove")
         self.del_doc_btn.connect("clicked", self._on_remove_document)
-        row.append(self.add_doc_btn); row.append(self.open_doc_btn)
-        row.append(self.del_doc_btn)
+        row.append(self.import_doc_btn); row.append(self.add_doc_btn)
+        row.append(self.open_doc_btn); row.append(self.del_doc_btn)
         box.append(row)
         return box
 
@@ -299,10 +305,10 @@ class OrganiserView(Gtk.Box):
         ws = self._ws()
         if not ws or not self._account:
             return
-        dlg = Gtk.FileDialog(title="Choose a file inside the workspace")
+        dlg = Gtk.FileDialog(title="Choose a file inside the data folder")
         from gi.repository import Gio
-        root = Gio.File.new_for_path(ws.root)
-        dlg.set_initial_folder(root)
+        base = Gio.File.new_for_path(ws.data_folder)
+        dlg.set_initial_folder(base)
         dlg.open(self.window, None, self._on_document_chosen)
 
     def _on_document_chosen(self, dlg, result) -> None:
@@ -314,8 +320,28 @@ class OrganiserView(Gtk.Box):
             self._ws().add_document(self._account, gfile.get_path())
         except PathOutsideWorkspaceError:
             self.window._error(
-                "That file is outside the workspace data folder. "
-                "Only files inside the workspace can be added as documents.")
+                "That file is outside the data folder. Only files inside the "
+                "data folder can be added as documents. You can change the "
+                "data folder in the Setup tab.")
+            return
+        self._reload_documents()
+
+    def _on_import_document(self, *_a) -> None:
+        ws = self._ws()
+        if not ws or not self._account:
+            return
+        dlg = Gtk.FileDialog(title="Choose a file to import into the data folder")
+        dlg.open(self.window, None, self._on_import_chosen)
+
+    def _on_import_chosen(self, dlg, result) -> None:
+        try:
+            gfile = dlg.open_finish(result)
+        except Exception:
+            return
+        try:
+            self._ws().import_document(self._account, gfile.get_path())
+        except OSError as exc:
+            self.window._error(f"Could not import the file: {exc}")
             return
         self._reload_documents()
 
@@ -332,6 +358,7 @@ class OrganiserView(Gtk.Box):
     def _update_sensitivity(self) -> None:
         self.add_account_btn.set_sensitive(self._zone_key is not None)
         self.del_account_btn.set_sensitive(self._account is not None)
+        self.import_doc_btn.set_sensitive(self._account is not None)
         self.add_doc_btn.set_sensitive(self._account is not None)
         self.open_doc_btn.set_sensitive(self._document is not None)
         self.del_doc_btn.set_sensitive(self._document is not None)

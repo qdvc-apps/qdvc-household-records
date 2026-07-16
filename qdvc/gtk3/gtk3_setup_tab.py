@@ -19,8 +19,30 @@ class SetupTab(Gtk.Box):
         self.window = window
         self.set_border_width(10)
 
-        # ---- data folder --------------------------------------------
-        folder_frame = Gtk.Frame(label="Workspace data folder")
+        # ---- data folder (app-wide PDF store) -----------------------
+        data_frame = Gtk.Frame(label="Data folder (shared across all workspaces)")
+        dbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
+                       border_width=8)
+        hint = Gtk.Label(
+            label="All PDFs referenced by any workspace must live inside this "
+                  "folder. Document paths are stored relative to it.",
+            xalign=0.0)
+        hint.set_line_wrap(True)
+        hint.get_style_context().add_class("dim-label")
+        dbox.pack_start(hint, False, False, 0)
+        drow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.data_label = Gtk.Label(label="", xalign=0.0)
+        self.data_label.set_selectable(True)
+        dbtn = Gtk.Button(label="Change…")
+        dbtn.connect("clicked", self._on_change_data_folder)
+        drow.pack_start(self.data_label, True, True, 0)
+        drow.pack_start(dbtn, False, False, 0)
+        dbox.pack_start(drow, False, False, 0)
+        data_frame.add(dbox)
+        self.pack_start(data_frame, False, False, 0)
+
+        # ---- workspace folder (info only) ---------------------------
+        folder_frame = Gtk.Frame(label="Current workspace folder")
         fbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
                        border_width=8)
         self.folder_label = Gtk.Label(label="(no workspace open)", xalign=0.0)
@@ -143,6 +165,25 @@ class SetupTab(Gtk.Box):
             self.window.refresh_all()
 
     # ---- helpers -----------------------------------------------------
+    def _on_change_data_folder(self, *_a) -> None:
+        dlg = Gtk.FileChooserDialog(
+            title="Choose the data folder", parent=self.window,
+            action=Gtk.FileChooserAction.SELECT_FOLDER)
+        dlg.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
+                        "Select", Gtk.ResponseType.OK)
+        dlg.set_current_folder(self.window.config.data_folder)
+        if dlg.run() == Gtk.ResponseType.OK:
+            path = dlg.get_filename()
+            dlg.destroy()
+            self.window.config.data_folder = path
+            # Re-point the open workspace at the new data folder.
+            if self.window.workspace:
+                self.window.open_workspace(self.window.workspace.root)
+            else:
+                self.refresh()
+        else:
+            dlg.destroy()
+
     @staticmethod
     def _scrolled(child) -> Gtk.ScrolledWindow:
         sw = Gtk.ScrolledWindow()
@@ -153,6 +194,7 @@ class SetupTab(Gtk.Box):
 
     def refresh(self) -> None:
         ws = self.window.workspace
+        self.data_label.set_text(self.window.config.data_folder)
         self.folder_label.set_text(ws.root if ws else "(no workspace open)")
         self.people_store.clear()
         self.zb_store.clear()

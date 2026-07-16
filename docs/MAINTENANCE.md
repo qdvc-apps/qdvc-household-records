@@ -33,45 +33,64 @@ docs/                          This file + the GTK3/GTK4 comparison.
 tests/                         Model tests + fake-gi import smoke test.
 ```
 
+## Two folders: workspace vs data
+
+There are **two distinct locations**, and they are not the same thing:
+
+- **Workspace folder** — chosen per workspace; holds this workspace's YAML
+  (`household.yml`, `accounts/*.yml`). You may have several workspaces.
+- **Data folder** — a single, app-wide location configured in the XDG config
+  (`data_folder` key; default `$XDG_DATA_HOME/qdvc-household-records/data`).
+  It holds all the PDFs referenced by *every* workspace. Every document path is
+  stored **relative to the data folder**, and a file can only be added as a
+  document if it lives inside the data folder.
+
+The data folder is configured in the Setup tab; the current workspace folder is
+shown there too (info + open/change button).
+
 ## Data formats
 
-Inside a workspace:
+Inside a workspace folder:
 
 ```
 <workspace>/
     household.yml              people + zoneblocks (Setup-tab config)
     accounts/
         <account_id>.yml       one file per account, documents nested inside
-    <your document files>      PDFs etc., referenced by RELATIVE path
 ```
 
-`household.yml`:
+The PDFs themselves live under the separate **data folder**, not here.
+
+`household.yml` — IDs are slugified snake_case, derived from the name:
 
 ```yaml
 people:
-  - {id: person-abc123, name: Freja}
+  - {id: freja, name: Freja}
+  - {id: ludvig, name: Ludvig}
 zoneblocks:
-  - {id: zb-def456, name: Bank Statements, scope: both, icon: accessories-calculator-symbolic}
+  - {id: bank_statements, name: Bank Statements, scope: both, icon: accessories-calculator-symbolic}
 ```
 
-`accounts/<id>.yml`:
+`accounts/freja_bank_of_atlantis.yml` — the file name IS the account id, which
+combines the owner id (person id or `shared`) with the snake_case account name:
 
 ```yaml
-id: acc-...
-zone_key: zb-def456::person-abc123     # zoneblock_id::person_id (or ::shared)
+id: freja_bank_of_atlantis
+zone_key: bank_statements::freja       # zoneblock_id::person_id (or ::shared)
 name: Bank of Atlantis
 periodic: true
 cycle_days: 30
 notes: ""
 documents:
-  - id: doc-...
-    path: statements/2026-01.pdf       # RELATIVE to the workspace root
+  - id: doc-1a2b3c4d5e6f              # documents keep random ids (no name key)
+    path: statements/2026-01.pdf       # RELATIVE to the DATA FOLDER
     statement_number: "001"
     date_issued: "2026-01-31"
     notes: ""
 ```
 
-All writes are atomic (temp file + `os.replace`).
+Colliding slugs are de-duplicated with a numeric suffix (`freja_2`,
+`freja_bank_of_atlantis_2`). All writes are atomic (temp file + `os.replace`).
 
 ## Model / load pipeline
 
@@ -85,7 +104,11 @@ derived, never stored; accounts attach to a zone by its stable `zone_key`.
 - `zones()`, `accounts_for_zone(key)`, `account_by_id(id)`, `zone_by_key(key)`
 - `add_person / remove_person`, `add_zoneblock / remove_zoneblock`
 - `add_account`, `save_account`, `delete_account`
-- `add_document(account, absolute_path, …)` — enforces relative path
+- `add_document(account, absolute_path, …)` — *link*: catalogue a file that is
+  already inside the data folder (enforces relative path)
+- `import_document(account, source_path, …)` — *import*: copy a file from
+  anywhere into `<data_folder>/<account_id>/` (numeric suffix on name clash),
+  then catalogue it
 - `remove_document`
 - `relativise / absolutise / is_inside`
 - `is_fresh(account)` → True/False/None; `fresh_and_stale()`
@@ -94,8 +117,11 @@ derived, never stored; accounts attach to a zone by its stable `zone_key`.
 ## Relative-path enforcement
 
 `add_document` calls `relativise`, which uses `os.path.commonpath` to reject any
-file whose absolute path is not inside the workspace root, raising
-`PathOutsideWorkspaceError`. Both front-ends catch it and show an error.
+file whose absolute path is not inside the **data folder**, raising
+`PathOutsideDataFolderError` (aliased as `PathOutsideWorkspaceError` for
+compatibility). Both front-ends catch it and show an error, and their file
+choosers open rooted at the data folder. Changing the data folder in Setup
+re-opens the current workspace against the new folder.
 
 ## Freshness rule
 

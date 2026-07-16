@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
-from typing import Iterable
+import shutil
 
 import yaml
 
@@ -52,31 +52,44 @@ def _parse_date(value: str) -> _dt.date | None:
         return None
 
 
-class PathOutsideWorkspaceError(ValueError):
-    """Raised when a file to import is not inside the workspace folder."""
+class PathOutsideDataFolderError(ValueError):
+    """Raised when a file to import is not inside the app-wide data folder."""
+
+
+# Backwards-compatible alias.
+PathOutsideWorkspaceError = PathOutsideDataFolderError
 
 
 class Workspace:
-    """In-memory aggregate over the on-disk files."""
+    """In-memory aggregate over the on-disk files.
 
-    def __init__(self, root: str) -> None:
+    `root` is this workspace's own folder (its YAML lives here).
+    `data_folder` is the app-wide store of PDFs shared across ALL workspaces;
+    every document path is stored relative to it.
+    """
+
+    def __init__(self, root: str, data_folder: str | None = None) -> None:
         self.root = os.path.abspath(root)
+        # If not supplied, fall back to the workspace root so the pure layer
+        # remains usable standalone; the app always passes the configured folder.
+        self.data_folder = os.path.abspath(data_folder) if data_folder else self.root
         self.people: list[Person] = []
         self.zoneblocks: list[ZoneBlock] = []
         self.accounts: list[Account] = []
 
     # ---- lifecycle ---------------------------------------------------
     @classmethod
-    def create(cls, root: str) -> "Workspace":
-        ws = cls(root)
+    def create(cls, root: str, data_folder: str | None = None) -> "Workspace":
+        ws = cls(root, data_folder)
         os.makedirs(os.path.join(ws.root, ACCOUNTS_DIR), exist_ok=True)
+        os.makedirs(ws.data_folder, exist_ok=True)
         if not os.path.exists(ws._household_path()):
             ws.save_household()
         return ws
 
     @classmethod
-    def load(cls, root: str) -> "Workspace":
-        ws = cls(root)
+    def load(cls, root: str, data_folder: str | None = None) -> "Workspace":
+        ws = cls(root, data_folder)
         ws.reload()
         return ws
 
@@ -194,7 +207,8 @@ class Workspace:
 
     # ---- mutation API ------------------------------------------------
     def add_person(self, name: str) -> Person:
-        person = Person(id=naming.new_id("person"), name=name.strip())
+        taken = {p.id for p in self.people}
+        person = Person(id=naming.person_id(name, taken), name=name.strip())
         self.people.append(person)
         self.save_household()
         return person
@@ -206,7 +220,8 @@ class Workspace:
     def add_zoneblock(self, name: str, scope: str, icon: str) -> ZoneBlock:
         if scope not in VALID_SCOPES:
             scope = SCOPE_BOTH
-        zb = ZoneBlock(id=naming.new_id("zb"), name=name.strip(),
+        taken = {z.id for z in self.zoneblocks}
+        zb = ZoneBlock(id=naming.zoneblock_id(name, taken), name=name.strip(),
                        scope=scope, icon=icon or "folder-symbolic")
         self.zoneblocks.append(zb)
         self.save_household()
@@ -216,10 +231,17 @@ class Workspace:
         self.zoneblocks = [z for z in self.zoneblocks if z.id != zoneblock_id]
         self.save_household()
 
+    @staticmethod
+    def _owner_of_zone_key(zone_key: str) -> str:
+        """Extract the owner segment ('freja' or 'shared') from a zone key."""
+        return zone_key.split("::", 1)[-1] if "::" in zone_key else "shared"
+
     def add_account(self, zone_key: str, name: str, periodic: bool = False,
                     cycle_days: int = 0, notes: str = "") -> Account:
+        owner = self._owner_of_zone_key(zone_key)
+        taken = {a.id for a in self.accounts}
         acc = Account(
-            id=naming.new_id("acc"),
+            id=naming.account_id(owner, name, taken),
             zone_key=zone_key,
             name=name.strip(),
             periodic=periodic,
@@ -235,8 +257,8 @@ class Workspace:
                      notes: str = "") -> Document:
         """Add a filesystem file to an account as a relative-path document.
 
-        Raises PathOutsideWorkspaceError if the file is not inside the
-        workspace data folder.
+        The path is stored relative to the app-wide DATA FOLDER. Raises
+        PathOutsideDataFolderError if the file is not inside that folder.
         """
         rel = self.relativise(absolute_path)  # raises if outside
         doc = Document(
@@ -254,24 +276,55 @@ class Workspace:
         account.documents = [d for d in account.documents if d.id != document_id]
         self.save_account(account)
 
-    # ---- relative-path enforcement -----------------------------------
-    def relativise(self, absolute_path: str) -> str:
-        """Return a path relative to the workspace root, or raise.
+    def import_document(self, account: Account, source_path: str,
+                        statement_number: str = "", date_issued: str = "",
+                        notes: str = "") -> Document:
+        """Copy an external file INTO the data folder, then catalogue it.
 
-        Enforces the spec rule: a document MUST be inside the data folder.
+        The file is copied to `<data_folder>/<account_id>/<filename>`, with a
+        numeric suffix on the stem if that name is already taken. Unlike
+        `add_document`, the source may live anywhere on disk. Returns the new
+        Document (whose stored path is relative to the data folder).
+        """
+        source_path = os.path.abspath(source_path)
+        if not os.path.isfile(source_path):
+            raise FileNotFoundError(source_path)
+        dest_dir = os.path.join(self.data_folder, account.id)
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = self._nonclashing_destination(dest_dir, os.path.basename(source_path))
+        shutil.copy2(source_path, dest)
+        return self.add_document(account, dest, statement_number,
+                                 date_issued, notes)
+
+    @staticmethod
+    def _nonclashing_destination(dest_dir: str, filename: str) -> str:
+        """Return a path in dest_dir that does not already exist."""
+        stem, ext = os.path.splitext(filename)
+        candidate = os.path.join(dest_dir, filename)
+        n = 2
+        while os.path.exists(candidate):
+            candidate = os.path.join(dest_dir, f"{stem}_{n}{ext}")
+            n += 1
+        return candidate
+
+    # ---- relative-path enforcement (against the DATA FOLDER) ---------
+    def relativise(self, absolute_path: str) -> str:
+        """Return a path relative to the data folder, or raise.
+
+        Enforces the rule: a document MUST live inside the app-wide data folder.
         """
         abs_path = os.path.abspath(absolute_path)
-        root = self.root
+        base = self.data_folder
         try:
-            common = os.path.commonpath([abs_path, root])
+            common = os.path.commonpath([abs_path, base])
         except ValueError:
-            raise PathOutsideWorkspaceError(abs_path)
-        if common != root:
-            raise PathOutsideWorkspaceError(abs_path)
-        return os.path.relpath(abs_path, root)
+            raise PathOutsideDataFolderError(abs_path)
+        if common != base:
+            raise PathOutsideDataFolderError(abs_path)
+        return os.path.relpath(abs_path, base)
 
     def absolutise(self, relative_path: str) -> str:
-        return os.path.join(self.root, relative_path)
+        return os.path.join(self.data_folder, relative_path)
 
     def is_inside(self, absolute_path: str) -> bool:
         try:

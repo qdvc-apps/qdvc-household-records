@@ -25,6 +25,8 @@ mechanics.
 | Add account       | right-click zone row or Pane-2 blank space → menu | right-click zone row or Pane-2 blank space → popover menu |
 | Organiser P2/P3   | `Gtk.Paned` chain                           | `Gtk.Paned`, start child `resize=False` (no auto-resize)|
 | Documents source  | top-level PDFs in the account's folder      | same (shared core `scan_account`)                       |
+| Pane 3 rows       | pixbuf `application-pdf` + `document_label` (single column, no filename) | `application-pdf` image + `document_label` (single line, no filename) |
+| Open button       | `Gtk.Image` `application-pdf` + label        | `Adw.ButtonContent` icon `application-pdf` + label      |
 | Subfolder warning | `Gtk.InfoBar` atop Pane 3                    | `Adw.Banner` atop Pane 3                                 |
 | Detail editors    | popup dialogs (`gtk3_dialogs.py`)           | popup dialogs (`gtk4_dialogs.py`)                       |
 | Account settings   | right-click row → context menu → dialog     | right-click row → popover menu → dialog                 |

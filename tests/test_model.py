@@ -171,6 +171,29 @@ def test_zone_derivation():
     assert "Freja Electricity" not in labels
 
 
+def test_document_label_formats():
+    import datetime
+    from types import SimpleNamespace
+    from qdvc.ui_prefs import document_label
+    today = datetime.date(2026, 5, 28)  # 15 days after 2026-05-13
+
+    def doc(stmt="", date="", present=True):
+        return SimpleNamespace(statement_number=stmt, date_issued=date,
+                               notes="", present=present, filename="x.pdf")
+
+    assert document_label(doc(), today=today) == "(not tagged yet)"
+    assert document_label(doc(date="2026-05-13"), today=today) == \
+        "13 May 2026 (15d ago)"
+    assert document_label(doc(stmt="53"), today=today) == "Statement 53"
+    assert document_label(doc(stmt="53", date="2026-05-13"), today=today) == \
+        "No. 53 (13 May 2026, 15d ago)"
+    # missing marker appended, filename never used
+    lbl = document_label(doc(stmt="53", present=False), today=today)
+    assert lbl == "Statement 53  (missing)"
+    assert "x.pdf" not in document_label(doc(stmt="7", date="2026-05-13"),
+                                         today=today)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

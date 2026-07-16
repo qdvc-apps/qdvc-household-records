@@ -109,6 +109,13 @@ def catalogue_date_dialog(parent, iso_value: str, on_ok) -> None:
     clear_btn = Gtk.CheckButton(label="No date")
     clear_btn.set_active(not iso_value)
     box.append(clear_btn)
+
+    # If the user picks a date while "No date" is ticked, untick it.
+    def _on_day_selected(_cal):
+        if clear_btn.get_active():
+            clear_btn.set_active(False)
+    calendar.connect("day-selected", _on_day_selected)
+
     dlg.set_extra_child(box)
     dlg.add_response("cancel", "Cancel")
     dlg.add_response("ok", "Set")

@@ -67,6 +67,51 @@ def iso_ymd(value: str) -> tuple[int, int, int] | None:
     return (d.year, d.month, d.day) if d else None
 
 
+def _days_ago_phrase(value: str, today: _dt.date | None = None) -> str:
+    """Human phrase for how long ago a date was: '15d ago', 'today', 'in 3d'."""
+    d = parse_iso_date(value)
+    if d is None:
+        return ""
+    today = today or _dt.date.today()
+    delta = (today - d).days
+    if delta > 0:
+        return f"{delta}d ago"
+    if delta == 0:
+        return "today"
+    return f"in {-delta}d"
+
+
+def document_label(doc, today: _dt.date | None = None) -> str:
+    """Single-line label for a document in Pane 3 — never the filename.
+
+    Combines the catalogue's statement number and date issued:
+      * neither set           -> "(not tagged yet)"
+      * date only             -> "13 May 2026 (15d ago)"
+      * statement only        -> "Statement 53"
+      * both                  -> "No. 53 (13 May 2026, 15d ago)"
+    A trailing "  (missing)" marker is appended when the file is absent.
+    """
+    stmt = (doc.statement_number or "").strip()
+    date_iso = (doc.date_issued or "").strip()
+    has_date = parse_iso_date(date_iso) is not None
+    when = format_date(date_iso) if has_date else ""
+    ago = _days_ago_phrase(date_iso, today) if has_date else ""
+
+    if not stmt and not has_date:
+        label = "(not tagged yet)"
+    elif has_date and not stmt:
+        label = f"{when} ({ago})" if ago else when
+    elif stmt and not has_date:
+        label = f"Statement {stmt}"
+    else:  # both
+        inner = f"{when}, {ago}" if ago else when
+        label = f"No. {stmt} ({inner})"
+
+    if getattr(doc, "present", True) is False:
+        label += "  (missing)"
+    return label
+
+
 def format_validation_report(problems: dict[str, list[str]]) -> str:
     titles = {
         "orphan_accounts": "Accounts whose zone no longer exists",

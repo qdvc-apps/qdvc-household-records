@@ -14,7 +14,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk  # noqa: E402
 
 from ..platform_utils import open_with_default_app  # noqa: E402
-from ..ui_prefs import format_date, freshness_label  # noqa: E402
+from ..ui_prefs import document_label, format_date, freshness_label  # noqa: E402
 from ..workspace import PathOutsideDataFolderError  # noqa: E402
 from .gtk3_dialogs import account_settings_dialog, date_dialog  # noqa: E402
 
@@ -56,7 +56,7 @@ class OrganiserTab(Gtk.Box):
         col.add_attribute(text, "text", 1)
         count = Gtk.CellRendererText()
         count.set_property("xalign", 1.0)
-        count.get_style_context().add_class("dim-label")
+        count.set_property("foreground", "#888888")
         col.pack_start(count, False)
         col.add_attribute(count, "text", 3)
         self.zone_view.append_column(col)
@@ -112,23 +112,31 @@ class OrganiserTab(Gtk.Box):
         self.folder_info.set_line_wrap(True)
         box.pack_start(self.folder_info, False, False, 0)
 
-        # store: filename, date, present(bool as str via foreground), fg-color
-        self.doc_store = Gtk.ListStore(str, str, str, str)  # file, date, id, color
+        # store: pdf-icon, label, id, fg-color
+        self.doc_store = Gtk.ListStore(str, str, str, str)
         self.doc_view = Gtk.TreeView(model=self.doc_store)
-        fcol = Gtk.TreeViewColumn("File")
-        frenderer = Gtk.CellRendererText()
-        fcol.pack_start(frenderer, True)
-        fcol.add_attribute(frenderer, "text", 0)
-        fcol.add_attribute(frenderer, "foreground", 3)
-        self.doc_view.append_column(fcol)
-        self.doc_view.append_column(
-            Gtk.TreeViewColumn("Date issued", Gtk.CellRendererText(), text=1))
+        self.doc_view.set_headers_visible(False)
+        dcol = Gtk.TreeViewColumn("Document")
+        picon = Gtk.CellRendererPixbuf()
+        dcol.pack_start(picon, False)
+        dcol.add_attribute(picon, "icon-name", 0)
+        drenderer = Gtk.CellRendererText()
+        dcol.pack_start(drenderer, True)
+        dcol.add_attribute(drenderer, "text", 1)
+        dcol.add_attribute(drenderer, "foreground", 3)
+        self.doc_view.append_column(dcol)
         self.doc_view.get_selection().connect("changed", self._on_doc_selected)
         # NOTE: row-activated intentionally NOT connected (no open on click).
         box.pack_start(self._scrolled(self.doc_view), True, True, 0)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self.open_doc_btn = Gtk.Button(label="Open")
+        self.open_doc_btn = Gtk.Button()
+        open_content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        open_content.pack_start(
+            Gtk.Image.new_from_icon_name("application-pdf", Gtk.IconSize.BUTTON),
+            False, False, 0)
+        open_content.pack_start(Gtk.Label(label="Open"), False, False, 0)
+        self.open_doc_btn.add(open_content)
         self.open_doc_btn.connect("clicked", lambda *_: self._open_current_doc())
         self.refresh_docs_btn = Gtk.Button(label="Rescan folder")
         self.refresh_docs_btn.connect("clicked", lambda *_: self._reload_documents())
@@ -215,10 +223,9 @@ class OrganiserTab(Gtk.Box):
         if acc and ws:
             self._scan = ws.scan_account(acc)
             for d in self._scan.documents:
-                color = "gray" if not d.present else None
-                label = d.filename + ("  (missing)" if not d.present else "")
+                color = "#888888" if not d.present else None
                 self.doc_store.append(
-                    [label, format_date(d.date_issued), d.filename, color])
+                    ["application-pdf", document_label(d), d.filename, color])
             self.subfolder_bar.set_visible(bool(self._scan.has_subfolders))
             if not acc.folder:
                 self.folder_info.set_text("No folder set for this account. "
@@ -394,6 +401,15 @@ class OrganiserTab(Gtk.Box):
         doc.statement_number = self.cat_stmt.get_text()
         doc.notes = self.cat_notes.get_text()
         self._save_current_catalogue()
+        self._refresh_doc_row_label()
+
+    def _refresh_doc_row_label(self) -> None:
+        doc = self._current_document
+        if not doc:
+            return
+        model, it = self.doc_view.get_selection().get_selected()
+        if it:
+            model[it][1] = document_label(doc)
 
     def _save_current_catalogue(self) -> None:
         doc = self._current_document
@@ -413,9 +429,7 @@ class OrganiserTab(Gtk.Box):
         doc.date_issued = result["iso"]
         self._save_current_catalogue()
         self.cat_date_label.set_text(format_date(doc.date_issued))
-        model, it = self.doc_view.get_selection().get_selected()
-        if it:
-            model[it][1] = format_date(doc.date_issued)
+        self._refresh_doc_row_label()
         self._refresh_account_status_row()
 
     # ---- add / remove account ---------------------------------------

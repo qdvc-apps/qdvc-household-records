@@ -145,11 +145,15 @@ Dates (a document's *date issued*) are entered with a calendar picker dialog
 rather than a free-text field; the value is still stored as ISO `YYYY-MM-DD`.
 
 Clicking a document in Pane 3 only selects it (showing its catalogue in Pane 4);
-it does not open the PDF. Use the "Open" button to launch the file. Documents
-are the top-level PDFs in the account's folder; there is no import/add. Set an
-account's folder via right-click → "Set folder…" on the account row.
-Missing catalogued files are shown greyed, and a warning bar appears atop Pane 3
-if the folder has subfolders.
+it does not open the PDF. Use the **Open** button (which carries an
+`application-pdf` icon) to launch the file. Pane 3 rows never show the filename;
+instead each row has a PDF icon plus a single-line label computed by
+`ui_prefs.document_label(doc)`: "(not tagged yet)" when untagged;
+"13 May 2026 (15d ago)" for a date only; "Statement 53" for a statement only;
+"No. 53 (13 May 2026, 15d ago)" for both; with "  (missing)" appended when the
+file is absent. The label updates live as the catalogue is edited. In the date
+picker, ticking "No date" is cleared automatically if the user then selects a
+day on the calendar.
 
 Pane 1 (zones) is sorted alphabetically by label in both toolkits and shows a
 per-zone **account count** (a right-aligned cell renderer in GTK3; a badge label

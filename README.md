@@ -74,10 +74,12 @@ right-clicking the empty area of the accounts list. Right-click an existing
 account for its settings, folder options, or to remove it.
 
 Only PDFs directly in the folder are listed; if the folder contains subfolders,
-a warning appears and those are ignored. A file you had catalogued that later
-disappears from the folder is shown greyed as *missing*, with its tags kept.
-Selecting a document shows its catalogue (statement no., date issued, notes) but
-does not open it — use the **Open** button. To change an account's
+a warning appears and those are ignored. Each document is shown with a PDF icon
+and a label describing its catalogue tags (e.g. "No. 53 (13 May 2026, 15d ago)",
+or "(not tagged yet)" before you tag it) — not its filename. A file you had
+catalogued that later disappears is shown greyed as *missing*, with its tags
+kept. Selecting a document shows its catalogue (statement no., date issued,
+notes) but does not open it — use the **Open** button. To change an account's
 periodic/cycle/notes settings, right-click it in the Accounts pane.
 
 ## Requirements

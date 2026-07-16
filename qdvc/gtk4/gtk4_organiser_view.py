@@ -19,7 +19,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk  # noqa: E402
 
 from ..platform_utils import open_with_default_app  # noqa: E402
-from ..ui_prefs import format_date, freshness_label  # noqa: E402
+from ..ui_prefs import document_label, format_date, freshness_label  # noqa: E402
 from ..workspace import PathOutsideDataFolderError  # noqa: E402
 from .gtk4_dialogs import account_settings_dialog, catalogue_date_dialog  # noqa: E402
 
@@ -150,7 +150,11 @@ class OrganiserView(Adw.Bin):
         box.append(self._scrolled(self.doc_list))
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self.open_doc_btn = Gtk.Button(label="Open")
+        self.open_doc_btn = Gtk.Button()
+        open_content = Adw.ButtonContent()
+        open_content.set_icon_name("application-pdf")
+        open_content.set_label("Open")
+        self.open_doc_btn.set_child(open_content)
         self.open_doc_btn.connect("clicked", lambda *_: self._open_doc())
         self.rescan_btn = Gtk.Button(label="Rescan folder")
         self.rescan_btn.connect("clicked", lambda *_: self._reload_documents())
@@ -226,6 +230,26 @@ class OrganiserView(Adw.Bin):
         b.append(badge)
         row.set_child(b)
         return row
+
+    @staticmethod
+    def _document_row(doc) -> Gtk.ListBoxRow:
+        """Single-line row: PDF icon + document_label (never the filename)."""
+        row = Gtk.ListBoxRow()
+        b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        b.set_margin_top(6); b.set_margin_bottom(6)
+        b.set_margin_start(6); b.set_margin_end(6)
+        img = Gtk.Image.new_from_icon_name("application-pdf")
+        img.set_valign(Gtk.Align.CENTER)
+        b.append(img)
+        lbl = Gtk.Label(label=document_label(doc), xalign=0.0)
+        lbl.set_valign(Gtk.Align.CENTER)
+        lbl.set_hexpand(True)
+        if getattr(doc, "present", True) is False:
+            lbl.add_css_class("dim-label")
+        b.append(lbl)
+        row.set_child(b)
+        row._doc_filename = doc.filename
+        row._doc_label = lbl
         return row
 
     def _account_row(self, account) -> Gtk.ListBoxRow:
@@ -267,9 +291,9 @@ class OrganiserView(Adw.Bin):
         self._reload_accounts()
 
     def _fit_sidebar_width(self) -> None:
-        """Pin the sidebar to the minimum width that shows every label in full,
-        and stop it from resizing when the window resizes."""
-        natural = 220
+        """Pin the sidebar to the minimum width that shows every label in full
+        (plus a little breathing room), and stop it resizing with the window."""
+        natural = 240
         longest_label = 0
         ws = self._ws()
         if ws:
@@ -277,7 +301,7 @@ class OrganiserView(Adw.Bin):
                 longest_label = max(longest_label, len(z.label))
         # Heuristic floor (~8px per char + icon + badge + padding), used when
         # measure() is unreliable (e.g. before the widget is realized).
-        heuristic = 72 + longest_label * 8
+        heuristic = 88 + longest_label * 8
         child = self.zone_list.get_first_child()
         while child is not None:
             inner = child.get_child()
@@ -286,12 +310,12 @@ class OrganiserView(Adw.Bin):
                     # GTK4: measure(orientation, for_size) -> (min, nat, minb, natb)
                     result = inner.measure(Gtk.Orientation.HORIZONTAL, -1)
                     nat_w = result[1]
-                    natural = max(natural, int(nat_w) + 24)
+                    natural = max(natural, int(nat_w) + 40)
                 except (TypeError, ValueError, IndexError):
                     pass  # fall back to the heuristic below
             child = child.get_next_sibling()
         natural = max(natural, heuristic)
-        natural = min(natural, 460)  # sane ceiling
+        natural = min(natural, 480)  # sane ceiling
         # Fix the width: equal min == max means it cannot resize with the window.
         self.split.set_min_sidebar_width(natural)
         self.split.set_max_sidebar_width(natural)
@@ -314,10 +338,7 @@ class OrganiserView(Adw.Bin):
         if acc and ws:
             self._scan = ws.scan_account(acc)
             for d in self._scan.documents:
-                title = d.filename + ("  (missing)" if not d.present else "")
-                row = self._icon_row("", title, format_date(d.date_issued),
-                                     dim=not d.present)
-                row._doc_filename = d.filename
+                row = self._document_row(d)
                 self.doc_list.append(row)
             self.subfolder_bar.set_revealed(bool(self._scan.has_subfolders))
             if not acc.folder:
@@ -494,6 +515,16 @@ class OrganiserView(Adw.Bin):
         doc.statement_number = self.cat_stmt.get_text()
         doc.notes = self.cat_notes.get_text()
         self._save_current_catalogue()
+        self._refresh_doc_row_label()
+
+    def _refresh_doc_row_label(self) -> None:
+        doc = self._document
+        if not doc:
+            return
+        row = self.doc_list.get_selected_row()
+        lbl = getattr(row, "_doc_label", None) if row else None
+        if lbl is not None:
+            lbl.set_label(document_label(doc))
 
     def _save_current_catalogue(self) -> None:
         doc = self._document

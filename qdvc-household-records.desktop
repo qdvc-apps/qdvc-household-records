@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=QDVC Household Records
+Comment=Organise a household folder of PDF documents
+Exec=python3 /full/path/to/qdvc_household_records.py %U
+Path=/full/path/to
+Icon=folder-documents
+Terminal=false
+Categories=Office;Utility;
+StartupNotify=true
+StartupWMClass=qdvc-household-records

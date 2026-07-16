@@ -80,7 +80,12 @@ or "(not tagged yet)" before you tag it) — not its filename. A file you had
 catalogued that later disappears is shown greyed as *missing*, with its tags
 kept. Selecting a document shows its catalogue (statement no., date issued,
 notes) but does not open it — use the **Open** button. To change an account's
-periodic/cycle/notes settings, right-click it in the Accounts pane.
+periodic/cycle/notes settings, right-click it in the Accounts pane. Right-click
+an account or a document and choose **Reveal in file browser** to open its
+location in your file manager. For a document this highlights the file itself
+(via the freedesktop file-manager interface on Linux, Finder reveal on macOS,
+Explorer `/select` on Windows); for an account it opens its folder. This only
+views the location — the data folder is never modified.
 
 ## Requirements
 

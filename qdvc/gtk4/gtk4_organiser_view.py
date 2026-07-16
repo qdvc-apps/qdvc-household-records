@@ -12,13 +12,15 @@ writes to the data folder. Selecting a document does not open it.
 """
 from __future__ import annotations
 
+import os
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, Gtk  # noqa: E402
 
-from ..platform_utils import open_with_default_app  # noqa: E402
+from ..platform_utils import open_with_default_app, reveal_in_file_manager  # noqa: E402
 from ..ui_prefs import document_label, format_date, freshness_label  # noqa: E402
 from ..workspace import PathOutsideDataFolderError  # noqa: E402
 from .gtk4_dialogs import account_settings_dialog, catalogue_date_dialog  # noqa: E402
@@ -227,8 +229,7 @@ class OrganiserView(Adw.Bin):
         row.set_child(b)
         return row
 
-    @staticmethod
-    def _document_row(doc) -> Gtk.ListBoxRow:
+    def _document_row(self, doc) -> Gtk.ListBoxRow:
         """Single-line row: PDF icon + document_label (never the filename)."""
         row = Gtk.ListBoxRow()
         b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -246,6 +247,10 @@ class OrganiserView(Adw.Bin):
         row.set_child(b)
         row._doc_filename = doc.filename
         row._doc_label = lbl
+        gesture = Gtk.GestureClick()
+        gesture.set_button(3)
+        gesture.connect("pressed", self._on_doc_right_click, row)
+        row.add_controller(gesture)
         return row
 
     def _account_row(self, account) -> Gtk.ListBoxRow:
@@ -418,6 +423,8 @@ class OrganiserView(Adw.Bin):
         menu.append("Set folder…", "orgacct.setfolder")
         if self._account and self._account.folder:
             menu.append("Clear folder", "orgacct.clearfolder")
+        if self._account_folder_revealable():
+            menu.append("Reveal in file browser", "orgacct.reveal")
         menu.append("Remove account", "orgacct.remove")
         popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.set_parent(row)
@@ -432,6 +439,7 @@ class OrganiserView(Adw.Bin):
             "settings": self._open_account_settings,
             "setfolder": self._set_folder,
             "clearfolder": self._clear_folder,
+            "reveal": self._reveal_account_folder,
             "remove": self._on_remove_account,
         }
         for name, cb in specs.items():
@@ -440,6 +448,23 @@ class OrganiserView(Adw.Bin):
             group.add_action(act)
         self.insert_action_group("orgacct", group)
         self._acct_actions = group
+
+    def _account_folder_revealable(self) -> bool:
+        acc = self._account
+        ws = self._ws()
+        if not acc or not acc.folder or not ws:
+            return False
+        return os.path.isdir(ws.absolutise(acc.folder))
+
+    def _reveal_account_folder(self, *_a) -> None:
+        acc = self._account
+        ws = self._ws()
+        if not acc or not acc.folder or not ws:
+            return
+        target = ws.absolutise(acc.folder)
+        if os.path.isdir(target):
+            reveal_in_file_manager(
+                target, self.window.config.get("file_manager", ""))
 
     def _open_account_settings(self, *_a) -> None:
         if not self._account or not self._ws():
@@ -605,6 +630,52 @@ class OrganiserView(Adw.Bin):
         if doc and doc.present and self._account and self._ws():
             open_with_default_app(
                 self._ws().document_path(self._account, doc.filename))
+
+    # ---- document right-click menu ----------------------------------
+    def _on_doc_right_click(self, _gesture, _n, _x, _y, row) -> None:
+        self.doc_list.select_row(row)  # sets _document via selection
+        menu = Gio.Menu()
+        if self._document and self._document.present:
+            menu.append("Open", "orgdoc.open")
+        if self._doc_revealable():
+            menu.append("Reveal in file browser", "orgdoc.reveal")
+        if menu.get_n_items() == 0:
+            return  # nothing actionable for a missing file
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(row)
+        self._install_doc_actions()
+        popover.popup()
+
+    def _install_doc_actions(self) -> None:
+        if getattr(self, "_doc_actions", None):
+            return
+        group = Gio.SimpleActionGroup()
+        specs = {"open": self._open_doc, "reveal": self._reveal_current_doc}
+        for name, cb in specs.items():
+            act = Gio.SimpleAction.new(name, None)
+            act.connect("activate", lambda _a, _p, c=cb: c())
+            group.add_action(act)
+        self.insert_action_group("orgdoc", group)
+        self._doc_actions = group
+
+    def _doc_revealable(self) -> bool:
+        doc = self._document
+        ws = self._ws()
+        acc = self._account
+        if not doc or not doc.present or not acc or not ws:
+            return False
+        return os.path.exists(ws.document_path(acc, doc.filename))
+
+    def _reveal_current_doc(self, *_a) -> None:
+        doc = self._document
+        ws = self._ws()
+        acc = self._account
+        if not doc or not doc.present or not acc or not ws:
+            return
+        target = ws.document_path(acc, doc.filename)
+        if os.path.exists(target):
+            reveal_in_file_manager(
+                target, self.window.config.get("file_manager", ""))
 
     # ---- sensitivity ------------------------------------------------
     def _update_sensitivity(self) -> None:

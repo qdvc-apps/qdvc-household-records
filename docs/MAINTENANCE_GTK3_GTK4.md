@@ -31,6 +31,7 @@ mechanics.
 | Subfolder warning | `Gtk.InfoBar` atop Pane 3                    | `Adw.Banner` atop Pane 3                                 |
 | Detail editors    | popup dialogs (`gtk3_dialogs.py`)           | popup dialogs (`gtk4_dialogs.py`)                       |
 | Account settings   | right-click row → context menu → dialog     | right-click row → popover menu → dialog                 |
+| Reveal in browser  | right-click Pane-2 account (opens folder) or Pane-3 doc (selects file) → "Reveal in file browser" (`platform_utils.reveal_in_file_manager`) | same, via `orgacct.reveal` / `orgdoc.reveal` actions |
 | Setup item editing | right-click row → context menu (edit/delete)| per-row edit + delete buttons; "Add…" row               |
 | Date entry         | `Gtk.Calendar` in a dialog (0-based month)  | `Gtk.Calendar` in a dialog (`GLib.DateTime`, 1-based)   |
 | Data folder        | Preferences dialog                          | Preferences window                                      |

@@ -8,12 +8,14 @@ folder. Clicking a document does NOT open the PDF; use the Open button.
 """
 from __future__ import annotations
 
+import os
+
 import gi
 
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk  # noqa: E402
 
-from ..platform_utils import open_with_default_app  # noqa: E402
+from ..platform_utils import open_with_default_app, reveal_in_file_manager  # noqa: E402
 from ..ui_prefs import document_label, format_date, freshness_label  # noqa: E402
 from ..workspace import PathOutsideDataFolderError  # noqa: E402
 from .gtk3_dialogs import account_settings_dialog, date_dialog  # noqa: E402
@@ -118,6 +120,7 @@ class OrganiserTab(Gtk.Box):
         dcol.add_attribute(drenderer, "foreground", 3)
         self.doc_view.append_column(dcol)
         self.doc_view.get_selection().connect("changed", self._on_doc_selected)
+        self.doc_view.connect("button-press-event", self._on_doc_click)
         # NOTE: row-activated intentionally NOT connected (no open on click).
         box.pack_start(self._scrolled(self.doc_view), True, True, 0)
 
@@ -257,6 +260,48 @@ class OrganiserTab(Gtk.Box):
         self._sync_catalogue()
         self._update_sensitivity()
 
+    # ---- right-click document menu ----------------------------------
+    def _on_doc_click(self, treeview, event) -> bool:
+        if event.button != 3:
+            return False
+        info = treeview.get_path_at_pos(int(event.x), int(event.y))
+        if info is None:
+            return False
+        treeview.get_selection().select_path(info[0])
+        # selection handler sets _current_document
+        menu = Gtk.Menu()
+        open_item = Gtk.MenuItem(label="Open")
+        open_item.connect("activate", lambda *_: self._open_current_doc())
+        open_item.set_sensitive(bool(self._current_document
+                                     and self._current_document.present))
+        menu.append(open_item)
+        reveal = Gtk.MenuItem(label="Reveal in file browser")
+        reveal.connect("activate", lambda *_: self._reveal_current_doc())
+        reveal.set_sensitive(self._doc_revealable())
+        menu.append(reveal)
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
+
+    def _doc_revealable(self) -> bool:
+        doc = self._current_document
+        ws = self._ws()
+        acc = self._current_account
+        if not doc or not doc.present or not acc or not ws:
+            return False
+        return os.path.exists(ws.document_path(acc, doc.filename))
+
+    def _reveal_current_doc(self) -> None:
+        doc = self._current_document
+        ws = self._ws()
+        acc = self._current_account
+        if not doc or not doc.present or not acc or not ws:
+            return
+        target = ws.document_path(acc, doc.filename)
+        if os.path.exists(target):
+            reveal_in_file_manager(
+                target, self.window.config.get("file_manager", ""))
+
     # ---- right-click zone menu (add account here) -------------------
     def _on_zone_click(self, treeview, event) -> bool:
         if event.button != 3:
@@ -307,6 +352,10 @@ class OrganiserTab(Gtk.Box):
             clearf = Gtk.MenuItem(label="Clear folder")
             clearf.connect("activate", lambda *_: self._clear_folder())
             menu.append(clearf)
+        reveal = Gtk.MenuItem(label="Reveal in file browser")
+        reveal.connect("activate", lambda *_: self._reveal_account_folder())
+        reveal.set_sensitive(self._account_folder_revealable())
+        menu.append(reveal)
         menu.append(Gtk.SeparatorMenuItem())
         remove = Gtk.MenuItem(label="Remove account")
         remove.connect("activate", lambda *_: self._on_remove_account())
@@ -314,6 +363,23 @@ class OrganiserTab(Gtk.Box):
         menu.show_all()
         menu.popup_at_pointer(event)
         return True
+
+    def _account_folder_revealable(self) -> bool:
+        acc = self._current_account
+        ws = self._ws()
+        if not acc or not acc.folder or not ws:
+            return False
+        return os.path.isdir(ws.absolutise(acc.folder))
+
+    def _reveal_account_folder(self) -> None:
+        acc = self._current_account
+        ws = self._ws()
+        if not acc or not acc.folder or not ws:
+            return
+        target = ws.absolutise(acc.folder)
+        if os.path.isdir(target):
+            reveal_in_file_manager(
+                target, self.window.config.get("file_manager", ""))
 
     def _open_account_settings(self) -> None:
         acc = self._current_account

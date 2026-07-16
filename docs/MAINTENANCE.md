@@ -122,14 +122,24 @@ reflects the current folder contents.
 
 ## UI layer
 
-GTK3: menubar (File/Edit/View/Tools/Help) + toolbar subset + `Gtk.Notebook`
-of three tabs + statusbar. GTK4: `Adw.ViewStack` + `Adw.ViewSwitcher`, single
-header bar with a primary menu. Both call the same pure core.
+GTK3: menubar (File/Edit/View/Tools/Help, in that order) + toolbar subset +
+`Gtk.Notebook` of three tabs + statusbar. Per spec §8, GTK3 menu items are
+`Gtk.ImageMenuItem`s built by the shared `MainWindow._menu_item(label, icon,
+accel, callback)` helper: mnemonic labels (`_File`, etc.), `set_always_show_image
+(True)`, themed-icon resolution with a graceful fallback, and accelerators
+attached via `add_accelerator(..., AccelFlags.VISIBLE)` so the menu items own the
+shortcuts (there is no separate shortcuts module). The forbidden `Box(Image +
+Label)`-in-`MenuItem` pattern is NOT used. **Edit → Preferences** is the home of
+the preferences command; **Help → About** is present. Where a command sits in
+both menu and toolbar (Validate), `_update_actions_sensitivity` toggles both.
+GTK4: `Adw.ViewStack` + `Adw.ViewSwitcher`, single header bar with a primary
+menu. Both call the same pure core.
 
 Account settings (periodic / cycle / notes) are edited through an on-demand
-popup dialog, reached by right-clicking an account row (or the "Settings…"
-button in GTK4). There is no inline, always-live account editor — this both
-declutters Pane 2 and avoids libadwaita `SpinRow` re-entrancy crashes.
+popup dialog, reached by right-clicking an account row. Pane 2 has no footer
+buttons: **adding an account** is done by right-clicking a zone row in Pane 1 or
+right-clicking the blank area of the Pane 2 list. There is no inline account
+editor — this declutters Pane 2 and avoids libadwaita `SpinRow` re-entrancy.
 
 Dates (a document's *date issued*) are entered with a calendar picker dialog
 rather than a free-text field; the value is still stored as ISO `YYYY-MM-DD`.
@@ -137,14 +147,19 @@ rather than a free-text field; the value is still stored as ISO `YYYY-MM-DD`.
 Clicking a document in Pane 3 only selects it (showing its catalogue in Pane 4);
 it does not open the PDF. Use the "Open" button to launch the file. Documents
 are the top-level PDFs in the account's folder; there is no import/add. Set an
-account's folder via right-click → "Set folder…" (or the "Set folder…" button).
+account's folder via right-click → "Set folder…" on the account row.
 Missing catalogued files are shown greyed, and a warning bar appears atop Pane 3
 if the folder has subfolders.
 
-In **GTK4**, Pane 1 (zones) is a sidebar via `Adw.OverlaySplitView`, toggled by
-a header button shown only on the Organiser page. Panes 2 and 3 (accounts,
-documents) sit in a `Gtk.Paned` whose start child has `resize=False`, so the
-divider stays put and the panes don't auto-resize while navigating.
+Pane 1 (zones) is sorted alphabetically by label in both toolkits and shows a
+per-zone **account count** (a right-aligned cell renderer in GTK3; a badge label
+in GTK4). In **GTK4**, Pane 1 is a sidebar via `Adw.OverlaySplitView`, toggled by
+a header button shown only on the Organiser page; its icon and label are
+vertically centre-aligned, and `_fit_sidebar_width` pins the sidebar's
+`min==max` width to the longest label (never truncating, never auto-resizing
+with the window). Panes 2 and 3 sit in a `Gtk.Paned` whose start child has
+`resize=False`, so the divider stays put and the panes don't auto-resize while
+navigating.
 
 The **data folder** is app-wide and configured in Preferences (Edit →
 Preferences in GTK3; primary menu → Preferences in GTK4), not in the Setup tab,
@@ -160,8 +175,10 @@ a right-click context menu with an "Add…" button beneath.
   `save_account`, and the merge in `scan_account`), and Pane 4 in both
   `*_organiser_*` modules.
 - **New freshness logic:** edit `Workspace.is_fresh` only.
-- **New shortcut/command:** add to `ui_prefs.SHORTCUTS`, wire in
-  `gtk3_shortcuts.py` and `gtk4_actions.py`, add to both menus.
+- **New shortcut/command:** in GTK3 add a menu item via `_menu_item(...)` with
+  an `accel=` (the item owns the accelerator); in GTK4 add a `win.*`
+  `Gio.SimpleAction` and `set_accels_for_action`, plus the `Gtk.ShortcutsWindow`
+  entry built from `ui_prefs.SHORTCUTS`.
 - **New icon choice for zoneblocks:** `ui_prefs.ZONEBLOCK_ICONS`.
 
 ## Testing

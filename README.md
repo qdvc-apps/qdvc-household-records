@@ -62,11 +62,16 @@ These are two different things:
 Each account is pointed at a **folder inside the data folder**. The top-level
 PDFs in that folder automatically become the account's documents — no more and
 no less. There is no importing or adding of files: to change an account's
-documents, change what's in its folder. Set an account's folder by right-click →
-"Set folder…" (or the "Set folder…" button) in the Accounts pane; the folder
-must be inside the data folder. The default data folder is
+documents, change what's in its folder. Set an account's folder by
+right-clicking the account and choosing "Set folder…"; the folder must be inside
+the data folder. The default data folder is
 `$XDG_DATA_HOME/qdvc-household-records/data` (usually
 `~/.local/share/qdvc-household-records/data`), changeable in Preferences.
+
+The zones list (Pane 1) is sorted alphabetically and shows how many accounts
+each zone holds. **Add an account** by right-clicking a zone in Pane 1, or
+right-clicking the empty area of the accounts list. Right-click an existing
+account for its settings, folder options, or to remove it.
 
 Only PDFs directly in the folder are listed; if the folder contains subfolders,
 a warning appears and those are ignored. A file you had catalogued that later

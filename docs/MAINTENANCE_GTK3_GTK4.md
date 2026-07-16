@@ -9,23 +9,25 @@ mechanics.
 |--------------------|---------------------------------------------|---------------------------------------------------------|
 | Application        | `Gtk.Application` (`gtk3_app.py`)           | `Adw.Application` (`gtk4_app.py`)                        |
 | Main container     | `Gtk.ApplicationWindow`                     | `Adw.ApplicationWindow` + `Adw.ToolbarView`             |
-| Commands           | direct callbacks + `Gtk.AccelGroup`         | `Gio.SimpleAction` under `win.` (`gtk4_actions.py`)     |
+| Commands           | menu items own accelerators on the window `AccelGroup` | `Gio.SimpleAction` under `win.` (`gtk4_actions.py`)     |
 | Top chrome         | menubar + toolbar + statusbar               | single `Adw.HeaderBar` + primary menu                   |
 | Tab switching      | `Gtk.Notebook`                              | `Adw.ViewStack` + `Adw.ViewSwitcher`                    |
 | Preferences        | `Gtk.Dialog` (`gtk3_preferences.py`)        | `Adw.PreferencesWindow`, live-apply (`gtk4_preferences.py`) |
 | Toolbar-style pref | present (below/beside)                      | omitted (no toolbar)                                    |
 | Backend selector   | `Gtk.ComboBoxText`                          | `Adw.ComboRow` ("takes effect after restart")           |
 | Modal flows        | `dialog.run()`                              | async `Gtk.FileDialog` / `Adw.MessageDialog` callbacks  |
-| Shortcuts          | accelerators via `AccelGroup`               | `set_accels_for_action` + `Gtk.ShortcutsWindow`         |
+| Shortcuts          | menu-item accelerators (no separate module) | `set_accels_for_action` + `Gtk.ShortcutsWindow`         |
 | Lists (panes)      | `Gtk.TreeView` + `Gtk.ListStore`            | `Gtk.ListBox` of rows / `Adw.PreferencesGroup` rows     |
-| Detail editors     | `Gtk.Grid` of entries                       | `Adw.PreferencesGroup` with `EntryRow`/`SwitchRow`/`SpinRow` |
-
-| Organiser Pane 1  | column in a `Gtk.Paned` chain               | sidebar via `Adw.OverlaySplitView` (header toggle)      |
+| Menu items         | `Gtk.ImageMenuItem` + mnemonics + `add_accelerator` (MATE look, per spec §8) | model-based `Gio.Menu` primary menu |
+| Accelerators       | owned by the menu items' `add_accelerator` | `set_accels_for_action` on `win.*` |
+| Organiser Pane 1  | column in a `Gtk.Paned` chain; counts via a right-aligned cell renderer | sidebar via `Adw.OverlaySplitView`; counts via a badge label |
+| Sidebar width     | natural (tree column)                       | pinned min==max to fit longest label; never auto-resizes |
+| Add account       | right-click zone row or Pane-2 blank space → menu | right-click zone row or Pane-2 blank space → popover menu |
 | Organiser P2/P3   | `Gtk.Paned` chain                           | `Gtk.Paned`, start child `resize=False` (no auto-resize)|
 | Documents source  | top-level PDFs in the account's folder      | same (shared core `scan_account`)                       |
 | Subfolder warning | `Gtk.InfoBar` atop Pane 3                    | `Adw.Banner` atop Pane 3                                 |
 | Detail editors    | popup dialogs (`gtk3_dialogs.py`)           | popup dialogs (`gtk4_dialogs.py`)                       |
-| Account settings   | right-click row → context menu → dialog     | right-click row (or "Settings…" button) → dialog        |
+| Account settings   | right-click row → context menu → dialog     | right-click row → popover menu → dialog                 |
 | Setup item editing | right-click row → context menu (edit/delete)| per-row edit + delete buttons; "Add…" row               |
 | Date entry         | `Gtk.Calendar` in a dialog (0-based month)  | `Gtk.Calendar` in a dialog (`GLib.DateTime`, 1-based)   |
 | Data folder        | Preferences dialog                          | Preferences window                                      |

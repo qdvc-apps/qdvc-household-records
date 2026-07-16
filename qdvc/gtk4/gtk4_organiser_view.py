@@ -112,25 +112,21 @@ class OrganiserView(Adw.Bin):
         self.account_list = Gtk.ListBox()
         self.account_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.account_list.connect("row-selected", self._on_account_selected)
-        box.append(self._scrolled(self.account_list))
+        scroller = self._scrolled(self.account_list)
+        # Right-click on empty list space -> add-account menu for current zone.
+        empty_gesture = Gtk.GestureClick()
+        empty_gesture.set_button(3)
+        empty_gesture.connect("pressed", self._on_account_blank_right_click)
+        self.account_list.add_controller(empty_gesture)
+        box.append(scroller)
 
-        hint = Gtk.Label(label="Right-click an account for settings and folder.",
-                         xalign=0.0)
+        hint = Gtk.Label(
+            label="Right-click a zone or the account list to add an account. "
+                  "Right-click an account for settings and folder options.",
+            xalign=0.0)
         hint.add_css_class("dim-label")
         hint.set_wrap(True)
         box.append(hint)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self.add_account_btn = Gtk.Button(label="Add account…")
-        self.add_account_btn.connect("clicked", self._on_add_account)
-        self.folder_account_btn = Gtk.Button(label="Set folder…")
-        self.folder_account_btn.connect("clicked", lambda *_: self._set_folder())
-        self.del_account_btn = Gtk.Button(label="Remove")
-        self.del_account_btn.connect("clicked", self._on_remove_account)
-        row.append(self.add_account_btn)
-        row.append(self.folder_account_btn)
-        row.append(self.del_account_btn)
-        box.append(row)
         return box
 
     # ---- Pane 3: documents ------------------------------------------
@@ -191,8 +187,11 @@ class OrganiserView(Adw.Bin):
         b.set_margin_top(6); b.set_margin_bottom(6)
         b.set_margin_start(6); b.set_margin_end(6)
         if icon:
-            b.append(Gtk.Image.new_from_icon_name(icon))
+            img = Gtk.Image.new_from_icon_name(icon)
+            img.set_valign(Gtk.Align.CENTER)
+            b.append(img)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        text.set_valign(Gtk.Align.CENTER)
         t = Gtk.Label(label=title, xalign=0.0)
         if dim:
             t.add_css_class("dim-label")
@@ -203,6 +202,30 @@ class OrganiserView(Adw.Bin):
             text.append(s)
         b.append(text)
         row.set_child(b)
+        return row
+
+    @staticmethod
+    def _zone_row(icon, label, count) -> Gtk.ListBoxRow:
+        """A sidebar row: icon + label (vertically centered) + count badge."""
+        row = Gtk.ListBoxRow()
+        b = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        b.set_margin_top(6); b.set_margin_bottom(6)
+        b.set_margin_start(6); b.set_margin_end(6)
+        img = Gtk.Image.new_from_icon_name(icon or "folder-symbolic")
+        img.set_valign(Gtk.Align.CENTER)
+        b.append(img)
+        lbl = Gtk.Label(label=label, xalign=0.0)
+        lbl.set_valign(Gtk.Align.CENTER)
+        lbl.set_hexpand(True)
+        lbl.set_ellipsize(0)  # PANGO_ELLIPSIZE_NONE — never truncate
+        b.append(lbl)
+        badge = Gtk.Label(label=str(count))
+        badge.set_valign(Gtk.Align.CENTER)
+        badge.add_css_class("dim-label")
+        badge.add_css_class("numeric")
+        b.append(badge)
+        row.set_child(b)
+        return row
         return row
 
     def _account_row(self, account) -> Gtk.ListBoxRow:
@@ -231,11 +254,47 @@ class OrganiserView(Adw.Bin):
         self._clear(self.zone_list)
         ws = self._ws()
         if ws:
-            for z in ws.zones():
-                row = self._icon_row(z.icon, z.label)
+            for z in sorted(ws.zones(), key=lambda z: z.label.lower()):
+                count = len(ws.accounts_for_zone(z.key))
+                row = self._zone_row(z.icon, z.label, count)
                 row._zone_key = z.key
+                gesture = Gtk.GestureClick()
+                gesture.set_button(3)
+                gesture.connect("pressed", self._on_zone_right_click, row)
+                row.add_controller(gesture)
                 self.zone_list.append(row)
+        self._fit_sidebar_width()
         self._reload_accounts()
+
+    def _fit_sidebar_width(self) -> None:
+        """Pin the sidebar to the minimum width that shows every label in full,
+        and stop it from resizing when the window resizes."""
+        natural = 220
+        longest_label = 0
+        ws = self._ws()
+        if ws:
+            for z in ws.zones():
+                longest_label = max(longest_label, len(z.label))
+        # Heuristic floor (~8px per char + icon + badge + padding), used when
+        # measure() is unreliable (e.g. before the widget is realized).
+        heuristic = 72 + longest_label * 8
+        child = self.zone_list.get_first_child()
+        while child is not None:
+            inner = child.get_child()
+            if inner is not None:
+                try:
+                    # GTK4: measure(orientation, for_size) -> (min, nat, minb, natb)
+                    result = inner.measure(Gtk.Orientation.HORIZONTAL, -1)
+                    nat_w = result[1]
+                    natural = max(natural, int(nat_w) + 24)
+                except (TypeError, ValueError, IndexError):
+                    pass  # fall back to the heuristic below
+            child = child.get_next_sibling()
+        natural = max(natural, heuristic)
+        natural = min(natural, 460)  # sane ceiling
+        # Fix the width: equal min == max means it cannot resize with the window.
+        self.split.set_min_sidebar_width(natural)
+        self.split.set_max_sidebar_width(natural)
 
     def _reload_accounts(self) -> None:
         self._clear(self.account_list)
@@ -296,7 +355,42 @@ class OrganiserView(Adw.Bin):
         self._sync_catalogue()
         self._update_sensitivity()
 
-    # ---- account settings (right-click / button) --------------------
+    # ---- add-account via right-click (zone row / blank list) --------
+    def _on_zone_right_click(self, _gesture, _n, _x, _y, row) -> None:
+        self.zone_list.select_row(row)  # also sets _zone_key via selection
+        self._zone_key = getattr(row, "_zone_key", None)
+        self._show_add_account_menu(row)
+
+    def _on_account_blank_right_click(self, _gesture, _n, _x, _y) -> None:
+        if not self._zone_key:
+            return
+        # anchor the popover on the account list itself
+        self._show_add_account_menu(self.account_list)
+
+    def _show_add_account_menu(self, anchor) -> None:
+        if not self._zone_key:
+            return
+        ws = self._ws()
+        zone = ws.zone_by_key(self._zone_key) if ws else None
+        label = f"Add account to {zone.label}…" if zone else "Add account here…"
+        menu = Gio.Menu()
+        menu.append(label, "orgzone.add")
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(anchor)
+        self._install_zone_actions()
+        popover.popup()
+
+    def _install_zone_actions(self) -> None:
+        if getattr(self, "_zone_actions", None):
+            return
+        group = Gio.SimpleActionGroup()
+        act = Gio.SimpleAction.new("add", None)
+        act.connect("activate", lambda _a, _p: self._on_add_account())
+        group.add_action(act)
+        self.insert_action_group("orgzone", group)
+        self._zone_actions = group
+
+    # ---- account settings (right-click) -----------------------------
     def _on_account_right_click(self, _gesture, _n, _x, _y, row) -> None:
         self.account_list.select_row(row)
         self._show_account_menu(row)
@@ -452,14 +546,32 @@ class OrganiserView(Adw.Bin):
 
     def _on_add_account_response(self, dlg, response, entry) -> None:
         if response == "add" and entry.get_text().strip():
-            self._ws().add_account(self._zone_key, entry.get_text())
+            zk = self._zone_key
+            self._ws().add_account(zk, entry.get_text())
             self._reload_accounts()
+            self._refresh_zone_count(zk)
         dlg.destroy()
 
     def _on_remove_account(self, *_a) -> None:
         if self._account and self._ws():
+            zk = self._account.zone_key
             self._ws().delete_account(self._account)
             self._reload_accounts()
+            self._refresh_zone_count(zk)
+
+    def _refresh_zone_count(self, zone_key) -> None:
+        ws = self._ws()
+        if not ws or not zone_key:
+            return
+        count = len(ws.accounts_for_zone(zone_key))
+        child = self.zone_list.get_first_child()
+        while child is not None:
+            if getattr(child, "_zone_key", None) == zone_key:
+                badge = child.get_child().get_last_child()
+                if isinstance(badge, Gtk.Label):
+                    badge.set_label(str(count))
+                break
+            child = child.get_next_sibling()
 
     def _open_doc(self) -> None:
         doc = self._document
@@ -470,9 +582,6 @@ class OrganiserView(Adw.Bin):
     # ---- sensitivity ------------------------------------------------
     def _update_sensitivity(self) -> None:
         doc = self._document
-        self.add_account_btn.set_sensitive(self._zone_key is not None)
-        self.folder_account_btn.set_sensitive(self._account is not None)
-        self.del_account_btn.set_sensitive(self._account is not None)
         self.rescan_btn.set_sensitive(self._account is not None)
         self.open_doc_btn.set_sensitive(bool(doc and doc.present))
 

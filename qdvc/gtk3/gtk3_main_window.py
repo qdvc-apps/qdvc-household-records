@@ -11,19 +11,25 @@ from ..workspace import Workspace  # noqa: E402
 from .gtk3_home_tab import HomeTab  # noqa: E402
 from .gtk3_organiser_tab import OrganiserTab  # noqa: E402
 from .gtk3_setup_tab import SetupTab  # noqa: E402
-from .gtk3_shortcuts import install_shortcuts  # noqa: E402
 
 
-def menu_item(label: str, icon: str | None = None) -> Gtk.MenuItem:
-    """Build a menu item with optional icon (no ImageMenuItem)."""
-    item = Gtk.MenuItem()
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-    if icon:
-        box.pack_start(Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.MENU),
-                       False, False, 0)
-    box.pack_start(Gtk.Label(label=label, xalign=0.0), True, True, 0)
-    item.add(box)
-    return item
+def _resolve_icon(icon: str | None) -> str | None:
+    """Resolve a themed icon name with a graceful fallback so a missing icon
+    never leaves a broken slot."""
+    if not icon:
+        return None
+    fallbacks = {
+        "help-about": "dialog-information",
+        "dialog-warning": "dialog-information",
+        "preferences-system": "gtk-preferences",
+    }
+    theme = Gtk.IconTheme.get_default()
+    if theme.has_icon(icon):
+        return icon
+    fb = fallbacks.get(icon)
+    if fb and theme.has_icon(fb):
+        return fb
+    return icon  # let GTK show whatever it can; slot stays aligned regardless
 
 
 class MainWindow(Gtk.ApplicationWindow):
@@ -67,41 +73,82 @@ class MainWindow(Gtk.ApplicationWindow):
         self._status_ctx = self.statusbar.get_context_id("main")
         root.pack_start(self.statusbar, False, False, 0)
 
-        install_shortcuts(self)
         self.apply_toolbar_style()
         self._update_actions_sensitivity()
         self.show_all()
         self.set_status("No workspace open.")
 
     # ---- menubar / toolbar ------------------------------------------
+    def _menu_item(self, label: str, icon: str | None = None,
+                   accel: str | None = None, callback=None) -> Gtk.MenuItem:
+        """Shared helper: a mnemonic ImageMenuItem with icon + accelerator.
+
+        Uses Gtk.ImageMenuItem (deliberate per the MATE-aligned GTK 3 target)
+        so GTK owns the icon/checkmark gutter and accelerator display, keeping
+        the classic look and left-padding correct.
+        """
+        resolved = _resolve_icon(icon)
+        if resolved:
+            item = Gtk.ImageMenuItem.new_with_mnemonic(label)
+            item.set_image(Gtk.Image.new_from_icon_name(resolved, Gtk.IconSize.MENU))
+            item.set_always_show_image(True)
+        else:
+            item = Gtk.MenuItem.new_with_mnemonic(label)
+        if callback is not None:
+            item.connect("activate", lambda *_: callback())
+        if accel:
+            key, mods = Gtk.accelerator_parse(accel)
+            if key:
+                item.add_accelerator("activate", self.accel_group, key, mods,
+                                     Gtk.AccelFlags.VISIBLE)
+        return item
+
     def _build_menubar(self) -> Gtk.MenuBar:
         bar = Gtk.MenuBar()
 
+        # File
         file_menu = Gtk.Menu()
-        mi = menu_item("New Workspace…", "document-new"); mi.connect("activate", lambda *_: self.action_new_workspace()); file_menu.append(mi)
-        mi = menu_item("Open Workspace…", "document-open"); mi.connect("activate", lambda *_: self.action_open_workspace()); file_menu.append(mi)
+        file_menu.append(self._menu_item("_New Workspace…", "document-new",
+                                         "<Primary>n", self.action_new_workspace))
+        file_menu.append(self._menu_item("_Open Workspace…", "document-open",
+                                         "<Primary>o", self.action_open_workspace))
         file_menu.append(Gtk.SeparatorMenuItem())
-        mi = menu_item("Quit", "application-exit"); mi.connect("activate", lambda *_: self.app.quit()); file_menu.append(mi)
-        top = Gtk.MenuItem(label="File"); top.set_submenu(file_menu); bar.append(top)
+        file_menu.append(self._menu_item("_Quit", "application-exit",
+                                         "<Primary>q", self.app.quit))
+        top = Gtk.MenuItem.new_with_mnemonic("_File")
+        top.set_submenu(file_menu); bar.append(top)
 
+        # Edit — home of Preferences (per spec)
         edit_menu = Gtk.Menu()
-        mi = menu_item("Preferences", "preferences-system"); mi.connect("activate", lambda *_: self.action_preferences()); edit_menu.append(mi)
-        top = Gtk.MenuItem(label="Edit"); top.set_submenu(edit_menu); bar.append(top)
+        edit_menu.append(self._menu_item("_Preferences", "preferences-system",
+                                         "<Primary>comma", self.action_preferences))
+        top = Gtk.MenuItem.new_with_mnemonic("_Edit")
+        top.set_submenu(edit_menu); bar.append(top)
 
+        # View — tab switching
         view_menu = Gtk.Menu()
-        for idx, name in enumerate(("Home", "Organiser", "Setup")):
-            mi = menu_item(name)
-            mi.connect("activate", lambda _w, i=idx: self.notebook.set_current_page(i))
-            view_menu.append(mi)
-        top = Gtk.MenuItem(label="View"); top.set_submenu(view_menu); bar.append(top)
+        accels = ("<Alt>1", "<Alt>2", "<Alt>3")
+        for idx, name in enumerate(("_Home", "_Organiser", "_Setup")):
+            view_menu.append(self._menu_item(
+                name, None, accels[idx],
+                lambda i=idx: self.notebook.set_current_page(i)))
+        top = Gtk.MenuItem.new_with_mnemonic("_View")
+        top.set_submenu(view_menu); bar.append(top)
 
+        # Tools
         tools_menu = Gtk.Menu()
-        mi = menu_item("Validate Workspace", "dialog-warning"); mi.connect("activate", lambda *_: self.action_validate()); tools_menu.append(mi)
-        top = Gtk.MenuItem(label="Tools"); top.set_submenu(tools_menu); bar.append(top)
+        self.mi_validate = self._menu_item("_Validate Workspace", "dialog-warning",
+                                           None, self.action_validate)
+        tools_menu.append(self.mi_validate)
+        top = Gtk.MenuItem.new_with_mnemonic("_Tools")
+        top.set_submenu(tools_menu); bar.append(top)
 
+        # Help — MUST include About
         help_menu = Gtk.Menu()
-        mi = menu_item("About", "help-about"); mi.connect("activate", lambda *_: self.action_about()); help_menu.append(mi)
-        top = Gtk.MenuItem(label="Help"); top.set_submenu(help_menu); bar.append(top)
+        help_menu.append(self._menu_item("_About", "help-about",
+                                         None, self.action_about))
+        top = Gtk.MenuItem.new_with_mnemonic("_Help")
+        top.set_submenu(help_menu); bar.append(top)
         return bar
 
     def _build_toolbar(self) -> Gtk.Toolbar:
@@ -210,9 +257,12 @@ class MainWindow(Gtk.ApplicationWindow):
     # ---- sensitivity -------------------------------------------------
     def _update_actions_sensitivity(self) -> None:
         has_ws = self.workspace is not None
-        # Reload + Validate are workspace-scoped (indices 1, 2).
+        # Reload + Validate are workspace-scoped (toolbar indices 1, 2).
         for btn in self._toolbar_buttons[1:]:
             btn.set_sensitive(has_ws)
+        # Validate also appears in the Tools menu; toggle both together.
+        if hasattr(self, "mi_validate"):
+            self.mi_validate.set_sensitive(has_ws)
 
     def _on_tab_switch(self, _nb, _page, _num) -> None:
         self._update_actions_sensitivity()

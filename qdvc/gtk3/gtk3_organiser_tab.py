@@ -44,7 +44,7 @@ class OrganiserTab(Gtk.Box):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         box.set_border_width(6)
         box.pack_start(Gtk.Label(label="Zones", xalign=0.0), False, False, 0)
-        self.zone_store = Gtk.ListStore(str, str, str)  # icon, label, key
+        self.zone_store = Gtk.ListStore(str, str, str, str)  # icon, label, key, count
         self.zone_view = Gtk.TreeView(model=self.zone_store)
         self.zone_view.set_headers_visible(False)
         col = Gtk.TreeViewColumn("Zone")
@@ -54,8 +54,14 @@ class OrganiserTab(Gtk.Box):
         text = Gtk.CellRendererText()
         col.pack_start(text, True)
         col.add_attribute(text, "text", 1)
+        count = Gtk.CellRendererText()
+        count.set_property("xalign", 1.0)
+        count.get_style_context().add_class("dim-label")
+        col.pack_start(count, False)
+        col.add_attribute(count, "text", 3)
         self.zone_view.append_column(col)
         self.zone_view.get_selection().connect("changed", self._on_zone_selected)
+        self.zone_view.connect("button-press-event", self._on_zone_click)
         box.pack_start(self._scrolled(self.zone_view), True, True, 0)
         return box
 
@@ -76,23 +82,12 @@ class OrganiserTab(Gtk.Box):
         box.pack_start(self._scrolled(self.account_view), True, True, 0)
 
         hint = Gtk.Label(
-            label="Right-click an account for settings and folder options.",
+            label="Right-click a zone or the account list to add an account. "
+                  "Right-click an account for settings and folder options.",
             xalign=0.0)
         hint.get_style_context().add_class("dim-label")
         hint.set_line_wrap(True)
         box.pack_start(hint, False, False, 0)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self.add_account_btn = Gtk.Button(label="Add account…")
-        self.add_account_btn.connect("clicked", self._on_add_account)
-        self.folder_account_btn = Gtk.Button(label="Set folder…")
-        self.folder_account_btn.connect("clicked", lambda *_: self._set_folder())
-        self.del_account_btn = Gtk.Button(label="Remove")
-        self.del_account_btn.connect("clicked", self._on_remove_account)
-        row.pack_start(self.add_account_btn, True, True, 0)
-        row.pack_start(self.folder_account_btn, False, False, 0)
-        row.pack_start(self.del_account_btn, False, False, 0)
-        box.pack_start(row, False, False, 0)
         return box
 
     # ---- Pane 3: documents ------------------------------------------
@@ -196,8 +191,9 @@ class OrganiserTab(Gtk.Box):
         self.zone_store.clear()
         ws = self._ws()
         if ws:
-            for z in ws.zones():
-                self.zone_store.append([z.icon, z.label, z.key])
+            for z in sorted(ws.zones(), key=lambda z: z.label.lower()):
+                count = len(ws.accounts_for_zone(z.key))
+                self.zone_store.append([z.icon, z.label, z.key, str(count)])
         self._reload_accounts()
 
     def _reload_accounts(self) -> None:
@@ -262,12 +258,40 @@ class OrganiserTab(Gtk.Box):
         self._sync_catalogue()
         self._update_sensitivity()
 
+    # ---- right-click zone menu (add account here) -------------------
+    def _on_zone_click(self, treeview, event) -> bool:
+        if event.button != 3:
+            return False
+        info = treeview.get_path_at_pos(int(event.x), int(event.y))
+        if info is None:
+            return False
+        treeview.get_selection().select_path(info[0])
+        self._current_zone_key = self.zone_store[info[0]][2]
+        self._popup_add_account_menu(event)
+        return True
+
+    def _popup_add_account_menu(self, event) -> None:
+        if not self._current_zone_key:
+            return
+        zone = self._ws().zone_by_key(self._current_zone_key) if self._ws() else None
+        label = f"Add account to {zone.label}…" if zone else "Add account here…"
+        menu = Gtk.Menu()
+        item = Gtk.MenuItem(label=label)
+        item.connect("activate", lambda *_: self._on_add_account())
+        menu.append(item)
+        menu.show_all()
+        menu.popup_at_pointer(event)
+
     # ---- right-click account context menu ---------------------------
     def _on_account_click(self, treeview, event) -> bool:
         if event.button != 3:
             return False
         info = treeview.get_path_at_pos(int(event.x), int(event.y))
         if info is None:
+            # right-click on empty space -> add-account menu for current zone
+            if self._current_zone_key:
+                self._popup_add_account_menu(event)
+                return True
             return False
         treeview.get_selection().select_path(info[0])
         model, it = treeview.get_selection().get_selected()
@@ -409,12 +433,25 @@ class OrganiserTab(Gtk.Box):
         if dlg.run() == Gtk.ResponseType.OK and entry.get_text().strip():
             self._ws().add_account(self._current_zone_key, entry.get_text())
             self._reload_accounts()
+            self._refresh_zone_count(self._current_zone_key)
         dlg.destroy()
 
     def _on_remove_account(self, *_a) -> None:
         if self._current_account and self._ws():
+            zk = self._current_account.zone_key
             self._ws().delete_account(self._current_account)
             self._reload_accounts()
+            self._refresh_zone_count(zk)
+
+    def _refresh_zone_count(self, zone_key) -> None:
+        ws = self._ws()
+        if not ws or not zone_key:
+            return
+        count = str(len(ws.accounts_for_zone(zone_key)))
+        for row in self.zone_store:
+            if row[2] == zone_key:
+                row[3] = count
+                break
 
     # ---- open --------------------------------------------------------
     def _open_current_doc(self) -> None:
@@ -425,13 +462,8 @@ class OrganiserTab(Gtk.Box):
 
     # ---- sensitivity -------------------------------------------------
     def _update_sensitivity(self) -> None:
-        has_zone = self._current_zone_key is not None
-        has_acc = self._current_account is not None
         doc = self._current_document
-        self.add_account_btn.set_sensitive(has_zone)
-        self.folder_account_btn.set_sensitive(has_acc)
-        self.del_account_btn.set_sensitive(has_acc)
-        self.refresh_docs_btn.set_sensitive(has_acc)
+        self.refresh_docs_btn.set_sensitive(self._current_account is not None)
         self.open_doc_btn.set_sensitive(bool(doc and doc.present))
 
     # ---- external navigation ----------------------------------------

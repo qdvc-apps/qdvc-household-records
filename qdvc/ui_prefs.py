@@ -46,6 +46,27 @@ def format_date(value: str) -> str:
         return str(value)
 
 
+def parse_iso_date(value: str) -> _dt.date | None:
+    """Parse an ISO 'YYYY-MM-DD' string, or return None."""
+    if not value:
+        return None
+    try:
+        return _dt.date.fromisoformat(str(value).strip())
+    except ValueError:
+        return None
+
+
+def date_to_iso(year: int, month: int, day: int) -> str:
+    """Build an ISO date string from calendar components (month is 1-based)."""
+    return _dt.date(year, month, day).isoformat()
+
+
+def iso_ymd(value: str) -> tuple[int, int, int] | None:
+    """Return (year, month, day) from an ISO string, or None. Month is 1-based."""
+    d = parse_iso_date(value)
+    return (d.year, d.month, d.day) if d else None
+
+
 def format_validation_report(problems: dict[str, list[str]]) -> str:
     titles = {
         "orphan_accounts": "Accounts whose zone no longer exists",

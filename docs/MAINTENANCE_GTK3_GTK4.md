@@ -20,6 +20,12 @@ mechanics.
 | Lists (panes)      | `Gtk.TreeView` + `Gtk.ListStore`            | `Gtk.ListBox` of rows / `Adw.PreferencesGroup` rows     |
 | Detail editors     | `Gtk.Grid` of entries                       | `Adw.PreferencesGroup` with `EntryRow`/`SwitchRow`/`SpinRow` |
 
+| Detail editors     | popup dialogs (`gtk3_dialogs.py`)           | popup dialogs (`gtk4_dialogs.py`)                       |
+| Account settings   | right-click row → context menu → dialog     | right-click row (or "Settings…" button) → dialog        |
+| Setup item editing | right-click row → context menu (edit/delete)| per-row edit + delete buttons; "Add…" row               |
+| Date entry         | `Gtk.Calendar` in a dialog (0-based month)  | `Gtk.Calendar` in a dialog (`GLib.DateTime`, 1-based)   |
+| Data folder        | Preferences dialog                          | Preferences window                                      |
+
 ## List-model / data-binding cheat-sheet
 
 - **GTK3** panes use `Gtk.ListStore` columns; the last hidden column stores the

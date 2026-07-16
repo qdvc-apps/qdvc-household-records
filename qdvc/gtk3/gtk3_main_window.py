@@ -164,9 +164,11 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         self.config.push_recent(path)
         self.set_title(f"{APP_NAME} — {path}")
-        self.refresh_all()
+        # Set status and sensitivity first so a refresh error can't leave the
+        # UI claiming no workspace is open.
         self._update_actions_sensitivity()
         self.set_status(f"Workspace: {path}")
+        self.refresh_all()
 
     def action_reload(self) -> None:
         if self.workspace:

@@ -46,6 +46,7 @@ class HomeTab(Gtk.Box):
             listbox.remove(child)
 
     def _add_row(self, listbox: Gtk.ListBox, account) -> None:
+        from html import escape
         ws = self.window.workspace
         zone = ws.zone_by_key(account.zone_key)
         subtitle = zone.label if zone else account.zone_key
@@ -53,7 +54,8 @@ class HomeTab(Gtk.Box):
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6,
                        border_width=6)
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        name = Gtk.Label(xalign=0.0); name.set_markup(f"<b>{account.name}</b>")
+        name = Gtk.Label(xalign=0.0)
+        name.set_markup(f"<b>{escape(account.name)}</b>")
         sub = Gtk.Label(label=subtitle, xalign=0.0)
         sub.get_style_context().add_class("dim-label")
         text.pack_start(name, False, False, 0)

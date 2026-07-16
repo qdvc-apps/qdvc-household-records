@@ -217,6 +217,13 @@ class Workspace:
         self.people = [p for p in self.people if p.id != person_id]
         self.save_household()
 
+    def update_person(self, person_id: str, name: str) -> None:
+        for p in self.people:
+            if p.id == person_id:
+                p.name = name.strip()
+                break
+        self.save_household()
+
     def add_zoneblock(self, name: str, scope: str, icon: str) -> ZoneBlock:
         if scope not in VALID_SCOPES:
             scope = SCOPE_BOTH
@@ -230,6 +237,25 @@ class Workspace:
     def remove_zoneblock(self, zoneblock_id: str) -> None:
         self.zoneblocks = [z for z in self.zoneblocks if z.id != zoneblock_id]
         self.save_household()
+
+    def update_zoneblock(self, zoneblock_id: str, name: str, scope: str,
+                         icon: str) -> None:
+        if scope not in VALID_SCOPES:
+            scope = SCOPE_BOTH
+        for z in self.zoneblocks:
+            if z.id == zoneblock_id:
+                z.name = name.strip()
+                z.scope = scope
+                z.icon = icon or "folder-symbolic"
+                break
+        self.save_household()
+
+    def update_account_settings(self, account: Account, periodic: bool,
+                                cycle_days: int, notes: str) -> None:
+        account.periodic = bool(periodic)
+        account.cycle_days = int(cycle_days or 0)
+        account.notes = notes
+        self.save_account(account)
 
     @staticmethod
     def _owner_of_zone_key(zone_key: str) -> str:

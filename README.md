@@ -54,20 +54,23 @@ These are two different things:
 
 - The **workspace folder** (chosen per workspace, opened from the File menu)
   holds this workspace's YAML catalogue files. You can keep several workspaces.
-- The **data folder** is a single, app-wide location (configured in the Setup
-  tab, stored in the app's XDG config) that holds all the PDFs referenced by
-  *every* workspace.
+- The **data folder** is a single, app-wide location (configured in
+  **Preferences**, stored in the app's XDG config) that holds all the PDFs
+  referenced by *every* workspace.
 
 When you add a file to an account, the app stores its path **relative to the
 data folder**, and you may only add files that live inside that data folder —
 files elsewhere are rejected. The default data folder is
 `$XDG_DATA_HOME/qdvc-household-records/data` (usually
-`~/.local/share/qdvc-household-records/data`).
+`~/.local/share/qdvc-household-records/data`), and you can change it in
+Preferences.
 
 In the Organiser, the Documents pane offers two ways to add a file: **Import…**
 copies a file from anywhere on disk into the data folder (under a subfolder named
 after the account) and then catalogues it, while **Link…** catalogues a file that
-is already inside the data folder.
+is already inside the data folder. Selecting a document shows its catalogue but
+does not open it; use the **Open** button to launch the PDF. To change an
+account's periodic/cycle/notes settings, right-click it in the Accounts pane.
 
 ## Requirements
 

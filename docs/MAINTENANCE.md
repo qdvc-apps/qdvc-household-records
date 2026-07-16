@@ -102,8 +102,9 @@ derived, never stored; accounts attach to a zone by its stable `zone_key`.
 ## Query & mutation API (workspace.py)
 
 - `zones()`, `accounts_for_zone(key)`, `account_by_id(id)`, `zone_by_key(key)`
-- `add_person / remove_person`, `add_zoneblock / remove_zoneblock`
-- `add_account`, `save_account`, `delete_account`
+- `add_person / remove_person / update_person`
+- `add_zoneblock / remove_zoneblock / update_zoneblock`
+- `add_account`, `save_account`, `delete_account`, `update_account_settings`
 - `add_document(account, absolute_path, …)` — *link*: catalogue a file that is
   already inside the data folder (enforces relative path)
 - `import_document(account, source_path, …)` — *import*: copy a file from
@@ -134,6 +135,24 @@ there are no dated documents, else `True` iff
 GTK3: menubar (File/Edit/View/Tools/Help) + toolbar subset + `Gtk.Notebook`
 of three tabs + statusbar. GTK4: `Adw.ViewStack` + `Adw.ViewSwitcher`, single
 header bar with a primary menu. Both call the same pure core.
+
+Account settings (periodic / cycle / notes) are edited through an on-demand
+popup dialog, reached by right-clicking an account row (or the "Settings…"
+button in GTK4). There is no inline, always-live account editor — this both
+declutters Pane 2 and avoids libadwaita `SpinRow` re-entrancy crashes.
+
+Dates (a document's *date issued*) are entered with a calendar picker dialog
+rather than a free-text field; the value is still stored as ISO `YYYY-MM-DD`.
+
+Clicking a document in Pane 3 only selects it (showing its catalogue in Pane 4);
+it does not open the PDF. Use the "Open" button to launch the file.
+
+The **data folder** is app-wide and configured in Preferences (Edit →
+Preferences in GTK3; primary menu → Preferences in GTK4), not in the Setup tab,
+because it is shared across all workspaces. The Setup tab configures per-house
+data (people and zoneblocks), shown as editable lists: GTK4 gives each row an
+edit and delete button with an "Add…" row beneath; GTK3 exposes edit/delete via
+a right-click context menu with an "Add…" button beneath.
 
 ## Common maintenance tasks — where to touch
 

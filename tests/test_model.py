@@ -111,6 +111,22 @@ def test_import_document_copies_into_data_folder():
     assert os.path.exists(os.path.join(ws.data_folder, doc2.path))
 
 
+def test_update_methods():
+    _d, ws = build()
+    ws.update_person("freja", "Freja Updated")
+    assert next(p.name for p in ws.people if p.id == "freja") == "Freja Updated"
+    ws.update_zoneblock("payslips", "Wages", SCOPE_SHARED, "go-home-symbolic")
+    zb = next(z for z in ws.zoneblocks if z.id == "payslips")
+    assert zb.name == "Wages" and zb.scope == SCOPE_SHARED
+    zk = next(z.key for z in ws.zones() if z.person_id is None
+              and z.zoneblock_id == "bank_statements")
+    acc = ws.add_account(zk, "Shared Bank")
+    ws.update_account_settings(acc, True, 45, "quarterly-ish")
+    reloaded = Workspace.load(_d, ws.data_folder).account_by_id(acc.id)
+    assert reloaded.periodic and reloaded.cycle_days == 45
+    assert reloaded.notes == "quarterly-ish"
+
+
 def test_reload_roundtrip():
     d, ws = build()
     data = ws.data_folder

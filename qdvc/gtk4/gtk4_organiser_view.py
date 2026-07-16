@@ -1,4 +1,9 @@
-"""GTK4 Organiser view — 4-pane master-detail (zones/accounts/docs/catalogue)."""
+"""GTK4 Organiser view — 4-pane master-detail (zones/accounts/docs/catalogue).
+
+Account settings are edited via a right-click context menu on the account row
+(popup dialog), not an inline editor. Documents are not opened by selection —
+only via the Open button.
+"""
 from __future__ import annotations
 
 import os
@@ -7,11 +12,12 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, Gtk  # noqa: E402
 
 from ..platform_utils import open_with_default_app  # noqa: E402
 from ..ui_prefs import format_date, freshness_label  # noqa: E402
 from ..workspace import PathOutsideWorkspaceError  # noqa: E402
+from .gtk4_dialogs import account_settings_dialog, catalogue_date_dialog  # noqa: E402
 
 
 class OrganiserView(Gtk.Box):
@@ -65,26 +71,25 @@ class OrganiserView(Gtk.Box):
         self.account_list.connect("row-selected", self._on_account_selected)
         box.append(self._scrolled(self.account_list))
 
+        hint = Gtk.Label(
+            label="Right-click an account to change its settings.",
+            xalign=0.0)
+        hint.add_css_class("dim-label")
+        hint.set_wrap(True)
+        box.append(hint)
+
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self.add_account_btn = Gtk.Button(label="Add account…")
         self.add_account_btn.connect("clicked", self._on_add_account)
+        self.settings_account_btn = Gtk.Button(label="Settings…")
+        self.settings_account_btn.connect("clicked",
+                                          lambda *_: self._open_account_settings())
         self.del_account_btn = Gtk.Button(label="Remove")
         self.del_account_btn.connect("clicked", self._on_remove_account)
-        row.append(self.add_account_btn); row.append(self.del_account_btn)
+        row.append(self.add_account_btn)
+        row.append(self.settings_account_btn)
+        row.append(self.del_account_btn)
         box.append(row)
-
-        self.account_group = Adw.PreferencesGroup()
-        self.acc_periodic = Adw.SwitchRow(title="Periodic")
-        self.acc_periodic.connect("notify::active", self._on_account_changed)
-        self.acc_cycle = Adw.SpinRow.new_with_range(0, 3650, 1)
-        self.acc_cycle.set_title("Cycle (days)")
-        self.acc_cycle.connect("notify::value", self._on_account_changed)
-        self.acc_notes = Adw.EntryRow(title="Notes")
-        self.acc_notes.connect("notify::text", self._on_account_changed)
-        self.account_group.add(self.acc_periodic)
-        self.account_group.add(self.acc_cycle)
-        self.account_group.add(self.acc_notes)
-        box.append(self.account_group)
         return box
 
     # ---- Pane 3: documents ------------------------------------------
@@ -93,7 +98,7 @@ class OrganiserView(Gtk.Box):
         self.doc_list = Gtk.ListBox()
         self.doc_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.doc_list.connect("row-selected", self._on_doc_selected)
-        self.doc_list.connect("row-activated", lambda *_: self._open_doc())
+        # NOTE: selecting/activating a row must NOT open the PDF.
         box.append(self._scrolled(self.doc_list))
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -119,8 +124,12 @@ class OrganiserView(Gtk.Box):
         self.catalogue_group = Adw.PreferencesGroup()
         self.cat_stmt = Adw.EntryRow(title="Statement no.")
         self.cat_stmt.connect("notify::text", self._on_catalogue_changed)
-        self.cat_date = Adw.EntryRow(title="Date issued (YYYY-MM-DD)")
-        self.cat_date.connect("notify::text", self._on_catalogue_changed)
+        # date picked via calendar dialog, not free text
+        self.cat_date = Adw.ActionRow(title="Date issued", subtitle="—")
+        date_btn = Gtk.Button(label="Pick…")
+        date_btn.set_valign(Gtk.Align.CENTER)
+        date_btn.connect("clicked", lambda *_: self._pick_date())
+        self.cat_date.add_suffix(date_btn)
         self.cat_notes = Adw.EntryRow(title="Notes")
         self.cat_notes.connect("notify::text", self._on_catalogue_changed)
         self.cat_path = Adw.ActionRow(title="Stored path", subtitle="—")
@@ -153,6 +162,17 @@ class OrganiserView(Gtk.Box):
         row.set_child(box)
         return row
 
+    def _account_row(self, account) -> Gtk.ListBoxRow:
+        row = self._icon_row("", account.name,
+                             freshness_label(self._ws().is_fresh(account)))
+        row._account_id = account.id
+        # right-click context menu
+        gesture = Gtk.GestureClick()
+        gesture.set_button(3)  # right mouse button
+        gesture.connect("pressed", self._on_account_right_click, row)
+        row.add_controller(gesture)
+        return row
+
     @staticmethod
     def _clear(listbox: Gtk.ListBox) -> None:
         child = listbox.get_first_child()
@@ -180,12 +200,9 @@ class OrganiserView(Gtk.Box):
         ws = self._ws()
         if ws and self._zone_key:
             for a in ws.accounts_for_zone(self._zone_key):
-                row = self._icon_row("", a.name, freshness_label(ws.is_fresh(a)))
-                row._account_id = a.id
-                self.account_list.append(row)
+                self.account_list.append(self._account_row(a))
         self._account = None
         self._reload_documents()
-        self._sync_account_editor()
         self._update_sensitivity()
 
     def _reload_documents(self) -> None:
@@ -210,7 +227,6 @@ class OrganiserView(Gtk.Box):
         self._account = (ws.account_by_id(getattr(row, "_account_id", ""))
                          if (row and ws) else None)
         self._reload_documents()
-        self._sync_account_editor()
         self._update_sensitivity()
 
     def _on_doc_selected(self, _lb, row) -> None:
@@ -223,36 +239,26 @@ class OrganiserView(Gtk.Box):
         self._sync_catalogue()
         self._update_sensitivity()
 
-    # ---- account editor ---------------------------------------------
-    def _sync_account_editor(self) -> None:
-        acc = self._account
-        self.account_group.set_sensitive(acc is not None)
-        self._suspend = True
-        self.acc_periodic.set_active(acc.periodic if acc else False)
-        self.acc_cycle.set_value(acc.cycle_days if acc else 0)
-        self.acc_notes.set_text(acc.notes if acc else "")
-        self._suspend = False
+    # ---- account settings (right-click / button) --------------------
+    def _on_account_right_click(self, _gesture, _n, _x, _y, row) -> None:
+        self.account_list.select_row(row)
+        self._open_account_settings()
 
-    def _on_account_changed(self, *_a) -> None:
-        if self._suspend or not self._account:
+    def _open_account_settings(self) -> None:
+        if not self._account or not self._ws():
             return
+        account_settings_dialog(self.window, self._account,
+                                self._save_account_settings)
+
+    def _save_account_settings(self, vals) -> None:
         acc = self._account
-        acc.periodic = self.acc_periodic.get_active()
-        acc.cycle_days = int(self.acc_cycle.get_value())
-        acc.notes = self.acc_notes.get_text()
-        self._ws().save_account(acc)
-        self._refresh_selected_account_subtitle()
-
-    def _refresh_selected_account_subtitle(self) -> None:
-        row = self.account_list.get_selected_row()
-        if row and self._account:
-            self._reload_accounts_preserving()
-
-    def _reload_accounts_preserving(self) -> None:
-        aid = self._account.id if self._account else None
+        if not acc:
+            return
+        self._ws().update_account_settings(
+            acc, vals["periodic"], vals["cycle_days"], vals["notes"])
+        aid = acc.id
         self._reload_accounts()
-        if aid:
-            self.select_account_row(aid)
+        self.select_account_row(aid)
 
     # ---- catalogue editor -------------------------------------------
     def _sync_catalogue(self) -> None:
@@ -260,7 +266,7 @@ class OrganiserView(Gtk.Box):
         self.catalogue_group.set_sensitive(doc is not None)
         self._suspend = True
         self.cat_stmt.set_text(doc.statement_number if doc else "")
-        self.cat_date.set_text(doc.date_issued if doc else "")
+        self.cat_date.set_subtitle(format_date(doc.date_issued) if doc else "—")
         self.cat_notes.set_text(doc.notes if doc else "")
         self.cat_path.set_subtitle(doc.path if doc else "—")
         self._suspend = False
@@ -270,9 +276,40 @@ class OrganiserView(Gtk.Box):
             return
         doc = self._document
         doc.statement_number = self.cat_stmt.get_text()
-        doc.date_issued = self.cat_date.get_text().strip()
         doc.notes = self.cat_notes.get_text()
         self._ws().save_account(self._account)
+
+    def _pick_date(self) -> None:
+        if not self._document:
+            return
+        catalogue_date_dialog(self.window, self._document.date_issued,
+                              self._save_date)
+
+    def _save_date(self, vals) -> None:
+        if not self._document:
+            return
+        self._document.date_issued = vals["iso"]
+        self._ws().save_account(self._account)
+        self.cat_date.set_subtitle(format_date(self._document.date_issued))
+        # date affects freshness — refresh the account list subtitle
+        aid = self._account.id if self._account else None
+        did = self._document.id
+        self._reload_accounts_keep(aid, did)
+
+    def _reload_accounts_keep(self, account_id, doc_id) -> None:
+        self._reload_accounts()
+        if account_id:
+            self.select_account_row(account_id)
+        if doc_id:
+            self._select_doc_row(doc_id)
+
+    def _select_doc_row(self, doc_id) -> None:
+        child = self.doc_list.get_first_child()
+        while child is not None:
+            if getattr(child, "_doc_id", None) == doc_id:
+                self.doc_list.select_row(child)
+                return
+            child = child.get_next_sibling()
 
     # ---- add / remove account ---------------------------------------
     def _on_add_account(self, *_a) -> None:
@@ -306,7 +343,6 @@ class OrganiserView(Gtk.Box):
         if not ws or not self._account:
             return
         dlg = Gtk.FileDialog(title="Choose a file inside the data folder")
-        from gi.repository import Gio
         base = Gio.File.new_for_path(ws.data_folder)
         dlg.set_initial_folder(base)
         dlg.open(self.window, None, self._on_document_chosen)
@@ -322,7 +358,7 @@ class OrganiserView(Gtk.Box):
             self.window._error(
                 "That file is outside the data folder. Only files inside the "
                 "data folder can be added as documents. You can change the "
-                "data folder in the Setup tab.")
+                "data folder in Preferences.")
             return
         self._reload_documents()
 
@@ -357,6 +393,7 @@ class OrganiserView(Gtk.Box):
     # ---- sensitivity ------------------------------------------------
     def _update_sensitivity(self) -> None:
         self.add_account_btn.set_sensitive(self._zone_key is not None)
+        self.settings_account_btn.set_sensitive(self._account is not None)
         self.del_account_btn.set_sensitive(self._account is not None)
         self.import_doc_btn.set_sensitive(self._account is not None)
         self.add_doc_btn.set_sensitive(self._account is not None)
